@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+chmod +x zen
+. ../zen/master
+if  [[ $1 == "-T" ]]; then  
+  o python3 tab -n > tab.out
+  cat tab.out 
+else  master $* it
+fi
