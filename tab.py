@@ -191,15 +191,15 @@ def csv(file):
 
 #----------------------------
 def demo():
-from datetime import datetime as date
-def Person(name="Abraham",yob=1809):
-  def age(i): return date.now().year - i.yob
-  def birthday(i): i.weight = int(i.weight*1.05)
-  return it(name=name, yob=yob,weight=100) + locals()
+  from datetime import datetime as date
+  def Person(name="Abraham",yob=1809):
+    def age(i): return date.now().year - i.yob
+    def birthday(i): i.weight = int(i.weight*1.05)
+    return it(name=name, yob=yob,weight=100) + locals()
 
-#---------------------------
-p = Person(name="John")
-for _ in range(56): p.birthday()
-print(p, f"age= {p.age()}")
-
-__name__ == "__main__" and demo()
+  #---------------------------
+  p = Person(name="John")
+  for _ in range(56): p.birthday()
+  print(p, f"age= {p.age()}")
+  
+#__name__ == "__main__" and demo()

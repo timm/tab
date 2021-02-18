@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.9.2" />
+<title>tab API documentation</title>
+<meta name="description" content="Store rows from csv data , summarized in columns …" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>tab</code></h1>
+</header>
+<section id="section-intro">
+<p>Store rows from csv data , summarized in columns</p>
+<ul>
+<li>License: (c) 2021 Tim Menzies <a href="&#109;&#97;&#105;&#108;&#116;&#111;&#58;&#116;&#105;&#109;&#109;&#64;&#105;&#101;&#101;&#101;&#46;&#111;&#114;&#103;">&#116;&#105;&#109;&#109;&#64;&#105;&#101;&#101;&#101;&#46;&#111;&#114;&#103;</a>, MIT License
+</li>
+<li>Doco: <a href="http://menzies.us/tab">http://menzies.us/tab</a>
+</li>
+<li>Code: <a href="http://github.com/timm/tab">http://github.com/timm/tab</a></li>
+<li>Example: see the <a href="#tab.demo">demo</a> function.</li>
+</ul>
+<p>Stores the csv data in <code><a title="tab.Row" href="#tab.Row">Row()</a></code>s held in <code><a title="tab.Tbl" href="#tab.Tbl">Tbl()</a></code> (tables).</p>
+<ul>
+<li>Missing values in each row are denoted <code>?</code>.</li>
+<li>Column names are stored in row@1.</li>
+<li>Numeric column names start in upper case.</li>
+<li>Goals to be minimized/maximized end in -/+ (respectively).</li>
+<li>Columns to be ignored have names with
+symbol <code>?</code>.<ul>
+<li>Ignored columns are summarized in <code><a title="tab.Skip" href="#tab.Skip">Skip()</a></code> instances (that do nothing).</li>
+</ul>
+</li>
+<li><code><a title="tab.Row" href="#tab.Row">Row()</a></code> columns are summarized in <code><a title="tab.Sym" href="#tab.Sym">Sym()</a></code>(bol) or <code><a title="tab.Num" href="#tab.Num">Num()</a></code>umeric columns or
+<code><a title="tab.Skip" href="#tab.Skip">Skip()</a></code> columns (that just ignore the data passed to them).</li>
+<li><code><a title="tab.Sym" href="#tab.Sym">Sym()</a></code>s count the symbols (and the mode, which is the most common symbol).</li>
+<li><code><a title="tab.Num" href="#tab.Num">Num()</a></code>s report the median and standard deviation of the nums seen so far.</li>
+<li>One <code><a title="tab.Row" href="#tab.Row">Row()</a></code> is better than another if</li>
+<li><code><a title="tab.Num" href="#tab.Num">Num()</a></code>s can also discretization their numerics into bins.</li>
+<li>Spurious bins are fused with their neighbors.</li>
+<li>Discretizations are stored as <code>Span</code>s.</li>
+<li><code><a title="tab.Cols" href="#tab.Cols">Cols()</a></code> store the <code>x/y/all</code> (independent/dependent/all) columns.</li>
+<li><code><a title="tab.Skip" href="#tab.Skip">Skip()</a></code>ed columns do not appear in the <code>x/y</code> lists.</li>
+</ul>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">#i!/usr/bin/env python3
+# vim: ts=2 sw=2 sts=2 et tw=81:
+&#34;&#34;&#34;
+Store rows from csv data , summarized in columns
+
+- License: (c) 2021 Tim Menzies &lt;timm@ieee.org&gt;, MIT License  
+- Doco: http://menzies.us/tab   
+- Code: http://github.com/timm/tab
+- Example: see the [demo](#tab.demo) function.
+
+Stores the csv data in `Row`s held in `Tbl` (tables).
+
+- Missing values in each row are denoted `?`.
+- Column names are stored in row@1.
+  - Numeric column names start in upper case.
+  - Goals to be minimized/maximized end in -/+ (respectively).
+  - Columns to be ignored have names with  symbol `?`.
+     - Ignored columns are summarized in `Skip` instances (that do nothing).
+- `Row` columns are summarized in `Sym`(bol) or `Num`umeric columns or
+`Skip` columns (that just ignore the data passed to them).
+  - `Sym`s count the symbols (and the mode, which is the most common symbol).
+  - `Num`s report the median and standard deviation of the nums seen so far.
+- One `Row` is better than another if
+- `Num`s can also discretization their numerics into bins.
+  - Spurious bins are fused with their neighbors.
+  - Discretizations are stored as `Span`s.
+- `Cols` store the `x/y/all` (independent/dependent/all) columns.
+ - `Skip`ed columns do not appear in the `x/y` lists.
+
+&#34;&#34;&#34;
+from it import it
+
+DELIMITER = &#39;,&#39;
+IGNORE    = r&#39;([\n\t\r ]|#.*)&#39;
+LESS      = &#39;-&#39; 
+MORE      = &#39;+&#39;
+SKIP      = &#39;?&#39;,
+      
+def Row(lst):
+  def ys(i,t): 
+    return [i.cells[c.pos] for c in t.cols.y]
+
+  def better(i,j,t):
+    s1,s2,n = 0,0,len(t.cols.y)
+    for col in t.cols.y:
+      pos,w = col.pos, col.w
+      a,b   = i.cells[pos], j.cells[pos]
+      a,b   = col.norm(a), col.norm(b)
+      s1   -= math.e**(w*(a-b)/n)
+      s2   -= math.e**(w*(b-a)/n)
+    return s1/n &lt; s2/n
+
+  def betters(i,t,some):
+    i.n = i.n or sum(better(i,random.choice(t.rows), t)
+                     for _ in range(some))/some
+    return i.n
+  #----------------------------------------
+  return it(cells=lst, n=None, best=False) + locals()
+
+def Tbl():
+  &#34;&#34;&#34;Initializes summary columns, stores data rows, sumarizes 
+  that data in columns. Optinonally , can also  marks 
+  rows as `best` or not (see the `classify` function)&#34;&#34;&#34;
+  def _row(i, lst): 
+    return Row([c.add(x) for c,x in zip(i.cols.all,lst)])
+
+  def _cols(i,lst): 
+    return [i.cols.add(n,txt) for n,txt in enumerate(lst)]
+
+  def classify(i,some=64,best=0.8):
+    i.rows = sorted(i.rows, key=lambda r: r.betters(i,some))
+    for n,row in enumerate(i.rows):
+      row.best = n &gt; len(i.rows)*best
+
+  def adds(i,src):
+    for lst in src:
+      if i.cols.all: i.rows     += [_row(i,lst)]
+      else:          i.cols.all  = _cols(i,lst)
+    return i
+  #-----------------------------------------
+  return it(cols=Cols(), rows=[]) + locals()
+
+def Cols():
+  &#34;Stored different kinds of columns in mulitple lists.&#34;
+  def add(i,pos,txt):
+    if   SKIP in txt                                   : f = Skip
+    elif LESS in txt or MORE in txt or txt[0].isupper(): f = Num
+    else                                               : f = Sym
+    now = f(pos=pos, txt=txt, w=-1 if LESS in txt else 1)
+    if   SKIP in txt                                   : also = []
+    elif LESS in txt or MORE in txt                    : also = i.y
+    else                                               : also = i.x
+    also  += [now]
+    return now
+
+  #----------------------------------------
+  return it(all=[], y=[], x=[]) + locals()
+
+def Skip(pos=0, txt=&#34;&#34;, w=1):
+  &#34;The simplest column: if yo pass it data, it forgets it instantly&#34;
+  def add(i,x):
+    if x != SKIP: i.n += 1; return x
+  #----------------------------------------
+  return o(pos=pos, txt=txt, w=w, n=0)  + locals()
+
+def Sym(pos=0, txt=&#34;&#34;, w=1):
+  &#34;Tracks symbol counts and can report mode and entropy.&#34;
+  def ent(i): 
+    return -sum(v/i.n*math.log(v/i.n,2) for v in i.seen.values())
+
+  def div(i, _): 
+    return [Span(x,x) for x in i.seen.keys()]
+
+  def spurious(i, j):
+    &#34;If two syms both conclude the same thing, combine them.&#34;
+    if i.mode == j.mode:
+      k = Sym(pos=i.pos, txt=i.txt, w=i.w)
+      for x,n in i.seen.items(): k.add(x,n)
+      for x,n in j.seen.items(): k.add(x,n)
+      return k
+
+  def add(i,x,n=1):
+    if x != SKIP:
+      i.n += n
+      now = i.seen[x] = i.seen.get(x, 0) + n
+      if now &gt; i.most: i.most, i.mode = now, x
+    return x
+  #----------------------------------------
+  return o(pos=pos, txt=txt, w=w, n=0, seen={}, most=0, mode=None) + locals()
+
+
+def Num(pos=0, txt=&#34;&#34;, w=1):
+  def mid(i)   : n,a = _all(i); return a[int(n/2)]
+  def var(i)   : n,a = _all(i); return (a[int(.9*n)] - a[int(n/10)]) / 2.56
+  def norm(i,x): _,a = _all(i); return (x - a[0]) / (a[-1] - a[0])
+  def _all(i)   :
+    i._all = i._all if i.ok else sorted(i._all)
+    i.ok = True
+    return len(i._all), i._all
+  def add(i, x):
+    if x != SKIP:
+      i._all += [x]; i.n+= 1; i.ok = False
+    return x
+  def div(i,t,cohen=.2, xchop=0.5):
+    xy = sorted([(r.cells[pos], r.tag) for r in t.rows
+                if r.cells[pos] != SKIP])
+    width = len(xy)**xchop
+    while width &lt; 4 and width &lt; len(xy) / 2: width *= 1.2
+    now = Span(xy[0][0], xy[0][0])
+    tmp = [now]
+    for j,(x,y) in enumerate(xy):
+      if j &lt; len(xy) - width:
+        if now._also.n &gt;= width:
+          if x != xy[j+1][0] and now.up - now.down &gt; i.var()*cohen:
+            now  = Span(now.up, x)
+            tmp += [now]
+      now.up = x
+      now._also.add(y)
+    out = _merge(tmp)
+    out[ 0].down = -math.inf
+    out[-1].up   =  math.inf
+    return out
+  def _merge(b4):
+    j, tmp, n = 0, [], len(b4)
+    while j &lt; n:
+      a = b4[j]
+      if j &lt; n - 1:
+        b  = b4[j+1]
+        now = a._also.spurious(b._also)
+        if now:
+          a = Span(a.down, b.up)
+          a._also = now
+          j += 1
+      tmp += [a]
+      j   += 1
+    return _merge(tmp) if len(tmp) &lt; len(b4) else b4
+  #----------------------------------------
+  return o(pos=pos, txt=txt, w=w, _all=[], ok=True, n=0) + locals()
+
+def csv(file):
+  &#34;&#34;&#34;Helper function: read csv rows, skip blank lines, coerce strings
+     to numbers, if needed.&#34;&#34;&#34;
+  def atom(x):
+    try: return int(x)
+    except Exception:
+      try: return float(x)
+      except Exception: return x
+  with open(file) as fp:
+    for a in fp:
+      yield [atom(x) for x in re.sub(IGNORE, &#39;&#39;, a).split(DELIMITER)]
+
+#----------------------------
+def demo():
+  from datetime import datetime as date
+  def Person(name=&#34;Abraham&#34;,yob=1809):
+    def age(i): return date.now().year - i.yob
+    def birthday(i): i.weight = int(i.weight*1.05)
+    return it(name=name, yob=yob,weight=100) + locals()
+
+  #---------------------------
+  p = Person(name=&#34;John&#34;)
+  for _ in range(56): p.birthday()
+  print(p, f&#34;age= {p.age()}&#34;)
+  
+#__name__ == &#34;__main__&#34; and demo()</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="tab.Row"><code class="name flex">
+<span>def <span class="ident">Row</span></span>(<span>lst)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def Row(lst):
+  def ys(i,t): 
+    return [i.cells[c.pos] for c in t.cols.y]
+
+  def better(i,j,t):
+    s1,s2,n = 0,0,len(t.cols.y)
+    for col in t.cols.y:
+      pos,w = col.pos, col.w
+      a,b   = i.cells[pos], j.cells[pos]
+      a,b   = col.norm(a), col.norm(b)
+      s1   -= math.e**(w*(a-b)/n)
+      s2   -= math.e**(w*(b-a)/n)
+    return s1/n &lt; s2/n
+
+  def betters(i,t,some):
+    i.n = i.n or sum(better(i,random.choice(t.rows), t)
+                     for _ in range(some))/some
+    return i.n
+  #----------------------------------------
+  return it(cells=lst, n=None, best=False) + locals()</code></pre>
+</details>
+</dd>
+<dt id="tab.Tbl"><code class="name flex">
+<span>def <span class="ident">Tbl</span></span>(<span>)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Initializes summary columns, stores data rows, sumarizes
+that data in columns. Optinonally , can also
+marks
+rows as <code>best</code> or not (see the <code>classify</code> function)</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def Tbl():
+  &#34;&#34;&#34;Initializes summary columns, stores data rows, sumarizes 
+  that data in columns. Optinonally , can also  marks 
+  rows as `best` or not (see the `classify` function)&#34;&#34;&#34;
+  def _row(i, lst): 
+    return Row([c.add(x) for c,x in zip(i.cols.all,lst)])
+
+  def _cols(i,lst): 
+    return [i.cols.add(n,txt) for n,txt in enumerate(lst)]
+
+  def classify(i,some=64,best=0.8):
+    i.rows = sorted(i.rows, key=lambda r: r.betters(i,some))
+    for n,row in enumerate(i.rows):
+      row.best = n &gt; len(i.rows)*best
+
+  def adds(i,src):
+    for lst in src:
+      if i.cols.all: i.rows     += [_row(i,lst)]
+      else:          i.cols.all  = _cols(i,lst)
+    return i
+  #-----------------------------------------
+  return it(cols=Cols(), rows=[]) + locals()</code></pre>
+</details>
+</dd>
+<dt id="tab.Cols"><code class="name flex">
+<span>def <span class="ident">Cols</span></span>(<span>)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Stored different kinds of columns in mulitple lists.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def Cols():
+  &#34;Stored different kinds of columns in mulitple lists.&#34;
+  def add(i,pos,txt):
+    if   SKIP in txt                                   : f = Skip
+    elif LESS in txt or MORE in txt or txt[0].isupper(): f = Num
+    else                                               : f = Sym
+    now = f(pos=pos, txt=txt, w=-1 if LESS in txt else 1)
+    if   SKIP in txt                                   : also = []
+    elif LESS in txt or MORE in txt                    : also = i.y
+    else                                               : also = i.x
+    also  += [now]
+    return now
+
+  #----------------------------------------
+  return it(all=[], y=[], x=[]) + locals()</code></pre>
+</details>
+</dd>
+<dt id="tab.Skip"><code class="name flex">
+<span>def <span class="ident">Skip</span></span>(<span>pos=0, txt='', w=1)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>The simplest column: if yo pass it data, it forgets it instantly</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def Skip(pos=0, txt=&#34;&#34;, w=1):
+  &#34;The simplest column: if yo pass it data, it forgets it instantly&#34;
+  def add(i,x):
+    if x != SKIP: i.n += 1; return x
+  #----------------------------------------
+  return o(pos=pos, txt=txt, w=w, n=0)  + locals()</code></pre>
+</details>
+</dd>
+<dt id="tab.Sym"><code class="name flex">
+<span>def <span class="ident">Sym</span></span>(<span>pos=0, txt='', w=1)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Tracks symbol counts and can report mode and entropy.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def Sym(pos=0, txt=&#34;&#34;, w=1):
+  &#34;Tracks symbol counts and can report mode and entropy.&#34;
+  def ent(i): 
+    return -sum(v/i.n*math.log(v/i.n,2) for v in i.seen.values())
+
+  def div(i, _): 
+    return [Span(x,x) for x in i.seen.keys()]
+
+  def spurious(i, j):
+    &#34;If two syms both conclude the same thing, combine them.&#34;
+    if i.mode == j.mode:
+      k = Sym(pos=i.pos, txt=i.txt, w=i.w)
+      for x,n in i.seen.items(): k.add(x,n)
+      for x,n in j.seen.items(): k.add(x,n)
+      return k
+
+  def add(i,x,n=1):
+    if x != SKIP:
+      i.n += n
+      now = i.seen[x] = i.seen.get(x, 0) + n
+      if now &gt; i.most: i.most, i.mode = now, x
+    return x
+  #----------------------------------------
+  return o(pos=pos, txt=txt, w=w, n=0, seen={}, most=0, mode=None) + locals()</code></pre>
+</details>
+</dd>
+<dt id="tab.Num"><code class="name flex">
+<span>def <span class="ident">Num</span></span>(<span>pos=0, txt='', w=1)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def Num(pos=0, txt=&#34;&#34;, w=1):
+  def mid(i)   : n,a = _all(i); return a[int(n/2)]
+  def var(i)   : n,a = _all(i); return (a[int(.9*n)] - a[int(n/10)]) / 2.56
+  def norm(i,x): _,a = _all(i); return (x - a[0]) / (a[-1] - a[0])
+  def _all(i)   :
+    i._all = i._all if i.ok else sorted(i._all)
+    i.ok = True
+    return len(i._all), i._all
+  def add(i, x):
+    if x != SKIP:
+      i._all += [x]; i.n+= 1; i.ok = False
+    return x
+  def div(i,t,cohen=.2, xchop=0.5):
+    xy = sorted([(r.cells[pos], r.tag) for r in t.rows
+                if r.cells[pos] != SKIP])
+    width = len(xy)**xchop
+    while width &lt; 4 and width &lt; len(xy) / 2: width *= 1.2
+    now = Span(xy[0][0], xy[0][0])
+    tmp = [now]
+    for j,(x,y) in enumerate(xy):
+      if j &lt; len(xy) - width:
+        if now._also.n &gt;= width:
+          if x != xy[j+1][0] and now.up - now.down &gt; i.var()*cohen:
+            now  = Span(now.up, x)
+            tmp += [now]
+      now.up = x
+      now._also.add(y)
+    out = _merge(tmp)
+    out[ 0].down = -math.inf
+    out[-1].up   =  math.inf
+    return out
+  def _merge(b4):
+    j, tmp, n = 0, [], len(b4)
+    while j &lt; n:
+      a = b4[j]
+      if j &lt; n - 1:
+        b  = b4[j+1]
+        now = a._also.spurious(b._also)
+        if now:
+          a = Span(a.down, b.up)
+          a._also = now
+          j += 1
+      tmp += [a]
+      j   += 1
+    return _merge(tmp) if len(tmp) &lt; len(b4) else b4
+  #----------------------------------------
+  return o(pos=pos, txt=txt, w=w, _all=[], ok=True, n=0) + locals()</code></pre>
+</details>
+</dd>
+<dt id="tab.csv"><code class="name flex">
+<span>def <span class="ident">csv</span></span>(<span>file)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Helper function: read csv rows, skip blank lines, coerce strings
+to numbers, if needed.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def csv(file):
+  &#34;&#34;&#34;Helper function: read csv rows, skip blank lines, coerce strings
+     to numbers, if needed.&#34;&#34;&#34;
+  def atom(x):
+    try: return int(x)
+    except Exception:
+      try: return float(x)
+      except Exception: return x
+  with open(file) as fp:
+    for a in fp:
+      yield [atom(x) for x in re.sub(IGNORE, &#39;&#39;, a).split(DELIMITER)]</code></pre>
+</details>
+</dd>
+<dt id="tab.demo"><code class="name flex">
+<span>def <span class="ident">demo</span></span>(<span>)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def demo():
+  from datetime import datetime as date
+  def Person(name=&#34;Abraham&#34;,yob=1809):
+    def age(i): return date.now().year - i.yob
+    def birthday(i): i.weight = int(i.weight*1.05)
+    return it(name=name, yob=yob,weight=100) + locals()
+
+  #---------------------------
+  p = Person(name=&#34;John&#34;)
+  for _ in range(56): p.birthday()
+  print(p, f&#34;age= {p.age()}&#34;)</code></pre>
+</details>
+</dd>
+</dl>
+</section>
+<section>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="two-column">
+<li><code><a title="tab.Row" href="#tab.Row">Row</a></code></li>
+<li><code><a title="tab.Tbl" href="#tab.Tbl">Tbl</a></code></li>
+<li><code><a title="tab.Cols" href="#tab.Cols">Cols</a></code></li>
+<li><code><a title="tab.Skip" href="#tab.Skip">Skip</a></code></li>
+<li><code><a title="tab.Sym" href="#tab.Sym">Sym</a></code></li>
+<li><code><a title="tab.Num" href="#tab.Num">Num</a></code></li>
+<li><code><a title="tab.csv" href="#tab.csv">csv</a></code></li>
+<li><code><a title="tab.demo" href="#tab.demo">demo</a></code></li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.9.2</a>.</p>
+</footer>
+</body>
+</html>
