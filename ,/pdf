@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# pdf: x.lua ==> ~/tmp/x.pdf, pretty-printed, 3-up landscape.
+# usage: ,/pdf file.lua [file2.lisp ...]   (Chars=65 Font=4.5 ,/pdf f)
+# a2ps splits option values on commas, so styles are installed
+# into a2ps's own library by name, then asked for by name
+# (lua for .lua, def for anything else).
+Here="$(cd "$(dirname "$0")/.." && pwd)"
+Dir=$(a2ps --list=defaults 2>/dev/null \
+      | awk '/library path/{getline; print $1; exit}')
+[ -n "$Dir" ] || { echo "no a2ps" >&2; exit 1; }
+mkdir -p "$Dir" ~/tmp
+for s in lua def; do
+  [ "$Here/etc/$s.ssh" -nt "$Dir/$s.ssh" ] &&
+    cp "$Here/etc/$s.ssh" "$Dir/$s.ssh"; done
+for f in "$@"; do
+  out=~/tmp/$(basename "${f%.*}").pdf
+  style=def; case "$f" in *.lua) style=lua;; esac
+  a2ps -Br --quiet --landscape --pro=color              \
+       --chars-per-line="${Chars:-65}"                  \
+       --font-size="${Font:-4.5}"                       \
+       --line-numbers=1 --borders=no --columns=3        \
+       -M letter --pretty-print=$style -o - "$f"        \
+    | ps2pdf - "$out" && echo "$out" && open "$out"
+done
