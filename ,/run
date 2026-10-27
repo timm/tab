@@ -15,14 +15,20 @@ go() { xargs -P "$P" -S 8192 -I{} "$@" >/dev/null; }
 case "${1:-help}" in
   nb)        ls "$MOOT"/classify/*.csv \
              | go luajit tab-eg.lua go=nb file={} ;;
+
   rmeans)    ls "$MOOT"/optimize/*/*.csv "$MOOT"/regression/*.csv \
              | go luajit tab-eg.lua go=rmeans file={} ;;
+
   rmeansall) ls "$MOOT"/optimize/*/*.csv "$MOOT"/regression/*.csv \
              | go luajit tab-eg.lua go=rmeansall file={} ;;
+
   lgbm)      ls "$MOOT"/classify/*.csv "$MOOT"/optimize/*/*.csv \
                 "$MOOT"/regression/*.csv \
              | go python3 etc/lgbm.py {} ;;
+
   results)   for x in nb rmeans rmeansall lgbm; do "$0" "$x" "$P"; done ;;
+
   fresh)     rm -rf "$CACHE" ;;
+
   *)         grep '^#' "$Self" | sed 's/^# *//' ;;
 esac

@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
-# sh: a work shell for tab. usage: ./sh
-Here="$(cd "$(dirname "$0")" && pwd)"
-export PATH="$Here:$PATH"
+# sh: a work shell for tab. usage: ,/sh
+Here="$(cd "$(dirname "$0")/.." && pwd)"
 export MOOT=${MOOT:-$HOME/gits/moot}
 export CACHE=${CACHE:-$HOME/tmp/cache}
+export PATH="$Here/,:$PATH"
 exec bash --init-file <(cat <<EOF
 [ -f ~/.bashrc ] && . ~/.bashrc
-cd "$Here/.."
+cd "$Here"
 alias t='luajit tab.lua'
 alias eg='luajit tab-eg.lua'
-PS1='tab> '
-echo "tab shell: t --all | t --secs | eg go=... | run ... | push"
+alias vi='nvim --clean -u "$Here/etc/nviminit.lua"'
+alias ..='cd ..'
+alias l='ls -lh'
+alias gs='git status -sb'
+alias gd='git diff --stat'
+HISTCONTROL=ignoredups:erasedups
+shopt -s histappend checkwinsize
+PS1='\[\e[36m\]\$(basename "\$(dirname "\$PWD")")/\W\[\e[0m\] ᐅ '
+echo "tab ᐅ  t --all | eg go=... | run | push | pdf | vi"
 EOF
 )
