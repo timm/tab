@@ -5,8 +5,9 @@ grand mean, weighed by variance. Lua, no dependencies, one file.
 
     tab.lua       the learner
     tab-eg.lua    the rigs
-    tab/          the common scripts: sh (work shell), run (parallel
+    ,/            the common scripts: sh (work shell), run (parallel
                   experiments), push (save upstream)
+    bin/          the installed command (see the rockspec)
     etc/          support code and config (lgbm.py, nn.py, charts.py ...)
     docs/         the figures
 
@@ -38,7 +39,7 @@ To use tab as a library elsewhere, install it as a rock:
     luajit tab.lua --all         # unit tests (needs moot)
     luajit tab.lua --secs        # time a train+guess
     luajit tab.lua file=x.csv --secs   # ... on your own csv
-    tab/run results              # every learner, every data set
+    ,/run results                # every learner, every data set
 
 The repo's pre-history lives on branch `26oct25`.
 

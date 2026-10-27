@@ -23,5 +23,8 @@ build = {
   modules = {
     tab = "tab.lua",
     ["tab-eg"] = "tab-eg.lua"
+  },
+  install = {
+    bin = { tab = "bin/tab" }
   }
 }

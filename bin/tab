@@ -1,0 +1,4 @@
+#!/usr/bin/env lua
+-- tab: the command line face of tab.lua.  "tab" alone prints help.
+local tab = require "tab"
+if #arg == 0 then tab.eg["-h"]() else tab.cli() end
