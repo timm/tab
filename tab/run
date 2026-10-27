@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# run: the learners, every relevant moot csv, in parallel.
+# usage: ./run nb|rmeans|rmeansall|lgbm|results|fresh [P]
+# Scores land in $CACHE; tab-eg.lua and lgbm.py skip any file
+# already written (force=y to insist), so re-runs are cheap.
+Self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+cd "$(dirname "$Self")" || exit 1
+MOOT=${MOOT:-$HOME/gits/moot}
+CACHE=${CACHE:-$HOME/tmp/cache}
+P=${2:-8}
+# -S 8192: BSD xargs assembles at most 255 bytes per -I line, and
+# silently drops the rest of the work when a path makes it longer.
+go() { xargs -P "$P" -S 8192 -I{} "$@" >/dev/null; }
+
+case "${1:-help}" in
+  nb)        ls "$MOOT"/classify/*.csv \
+             | go luajit tab-eg.lua go=nb file={} ;;
+  rmeans)    ls "$MOOT"/optimize/*/*.csv "$MOOT"/regression/*.csv \
+             | go luajit tab-eg.lua go=rmeans file={} ;;
+  rmeansall) ls "$MOOT"/optimize/*/*.csv "$MOOT"/regression/*.csv \
+             | go luajit tab-eg.lua go=rmeansall file={} ;;
+  lgbm)      ls "$MOOT"/classify/*.csv "$MOOT"/optimize/*/*.csv \
+                "$MOOT"/regression/*.csv \
+             | go python3 ../etc/lgbm.py {} ;;
+  results)   for x in nb rmeans rmeansall lgbm; do "$0" "$x" "$P"; done ;;
+  fresh)     rm -rf "$CACHE" ;;
+  *)         grep '^#' "$Self" | sed 's/^# *//' ;;
+esac

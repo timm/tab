@@ -1,26 +1,24 @@
-#  TAB: store rows from csv data , summarized in columns
+# tab
 
-<a  href="http://menzies.us/it"><img  width=200
-src="https://github.com/timm/zen/raw/main/read.png"></a>
+A good guess from a few dozen labels. Range means, shrunk to the
+grand mean, weighed by variance. Lua, no dependencies, one file.
 
-Copyright (c) 2021 Tim Menzies
+    tab/      the code: tab.lua (the learner), tab-eg.lua (the rigs),
+              and the common scripts: sh (work shell), run (parallel
+              experiments), push (save upstream)
+    etc/      support code and config (lgbm.py, nn.py, charts.py ...)
+    docs/     the figures
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Try:
 
-<img src="https://github.com/timm/zen/raw/main/coder.png" align=right width=300>
+    cd tab
+    luajit tab.lua --all        # unit tests
+    luajit tab.lua --secs       # time a train+guess
+    ./run results               # every learner, every data set
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Data: [moot](https://github.com/timm/moot), expected at `~/gits/moot`
+(override with `MOOT=...`).
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+The repo's pre-history lives on branch `26oct25`.
+
+(c) 2026 Tim Menzies, MIT license.

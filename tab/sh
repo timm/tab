@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# sh: a work shell for tab. usage: ./sh
+Here="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$Here:$PATH"
+export MOOT=${MOOT:-$HOME/gits/moot}
+export CACHE=${CACHE:-$HOME/tmp/cache}
+exec bash --init-file <(cat <<EOF
+[ -f ~/.bashrc ] && . ~/.bashrc
+cd "$Here"
+alias t='luajit tab.lua'
+alias eg='luajit tab-eg.lua'
+PS1='tab> '
+echo "tab shell: t --all | t --secs | eg go=... | run ... | push"
+EOF
+)
