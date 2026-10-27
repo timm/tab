@@ -6,7 +6,7 @@ export MOOT=${MOOT:-$HOME/gits/moot}
 export CACHE=${CACHE:-$HOME/tmp/cache}
 exec bash --init-file <(cat <<EOF
 [ -f ~/.bashrc ] && . ~/.bashrc
-cd "$Here"
+cd "$Here/.."
 alias t='luajit tab.lua'
 alias eg='luajit tab-eg.lua'
 PS1='tab> '

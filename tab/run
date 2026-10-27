@@ -4,7 +4,7 @@
 # Scores land in $CACHE; tab-eg.lua and lgbm.py skip any file
 # already written (force=y to insist), so re-runs are cheap.
 Self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-cd "$(dirname "$Self")" || exit 1
+cd "$(dirname "$Self")/.." || exit 1  # the repo root
 MOOT=${MOOT:-$HOME/gits/moot}
 CACHE=${CACHE:-$HOME/tmp/cache}
 P=${2:-8}
@@ -21,7 +21,7 @@ case "${1:-help}" in
              | go luajit tab-eg.lua go=rmeansall file={} ;;
   lgbm)      ls "$MOOT"/classify/*.csv "$MOOT"/optimize/*/*.csv \
                 "$MOOT"/regression/*.csv \
-             | go python3 ../etc/lgbm.py {} ;;
+             | go python3 etc/lgbm.py {} ;;
   results)   for x in nb rmeans rmeansall lgbm; do "$0" "$x" "$P"; done ;;
   fresh)     rm -rf "$CACHE" ;;
   *)         grep '^#' "$Self" | sed 's/^# *//' ;;
