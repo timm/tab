@@ -1,6 +1,8 @@
 #!/usr/bin/env lua
 -- vim: set ts=2 sw=2 sts=2 et cc=75 :
-local the,help = {}, [[
+local _ENV = setmetatable({}, {__index = _G})
+if setfenv then setfenv(1, _ENV) end   -- lua 5.1, luajit
+the,help = {}, [[
 tab.lua: a good guess from a few dozen labels.
 Range means, shrunk to the grand mean, weighed by variance.
 (c) 2026 Tim Menzies <timm@ieee.org> MIT license.
@@ -20,9 +22,6 @@ actions:
   -h               print help
   --secs           time rmeans: train, then guess
   --all            unit tests (--num, --split ... run just one)]]
-
-local _ENV = setmetatable({}, {__index = _G})
-if setfenv then setfenv(1, _ENV) end   -- lua 5.1, luajit
 
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
@@ -85,7 +84,39 @@ function csv(file,    rows,s) rows = {} -- first row is the names
       rows[#rows + 1] = cells(s) end end
   return rows end
 
--- ---- columns ---------------------------------------------------------
+-- ---- stats -----------------------------------------------------------
+function Same(xs,ys,    f)          -- two samples, sorted, to compare
+  f = function(t,    u)             -- on copies: the caller's list is
+        u = map(t, same); table.sort(u); return u end -- not ours
+  return new(SAME, {xs = f(xs), ys = f(ys)}) end
+
+function SAME.ok(i)                 -- do all three tests say "same"?
+  return i:cohen() <= .35 and i:cliffs() <= .195 and i:ks() <= 1.36 end
+
+function SAME.cohen(i,    a,b,sd)   -- gap of means, in pooled sds
+  a, b = nums(i.xs, same), nums(i.ys, same)
+  sd = sqrt(((a.n - 1) * a:div() ^ 2
+             + (b.n - 1) * b:div() ^ 2) / (a.n + b.n - 2))
+  return abs(a.mu - b.mu) / (sd + 1e-32) end
+
+function SAME.cliffs(i,    xs,ys,gt,lt,j,k) -- how often xs out-ranks ys
+  xs, ys, gt, lt, j, k = i.xs, i.ys, 0, 0, 0, 0
+  for _, x in order(xs) do
+    while j < #ys and ys[j+1] <  x do j = j + 1; k = j end
+    while k < #ys and ys[k+1] == x do k = k + 1 end
+    gt, lt = gt + j, lt + #ys - k end
+  return abs(gt - lt) / (#xs * #ys) end
+
+function SAME.ks(i,    xs,ys,p,q,d,v) -- widest gap of two cdfs, in crits
+  xs, ys, p, q, d = i.xs, i.ys, 0, 0, 0
+  while p < #xs and q < #ys do
+    v = min(xs[p+1], ys[q+1])
+    while p < #xs and xs[p+1] == v do p = p + 1 end
+    while q < #ys and ys[q+1] == v do q = q + 1 end
+    d = max(d, abs(p/#xs - q/#ys)) end
+  return d / sqrt((#xs + #ys) / (#xs * #ys)) end
+
+-- ---- columns ---------------------------------------------------------
 -- NUM and SYM share one protocol: add, div, norm, bin.  Each verb's
 -- two faces sit together below.  nVals is SYM's alone.
 
@@ -141,7 +172,7 @@ function SYM.nVals(i,    f)         -- how many values i has seen;
   i.kinds = i.kinds or max(2, sum(i.has, f))
   return i.kinds end
 
--- ---- tables ----------------------------------------------------------
+-- ---- tables ----------------------------------------------------------
 function Tab(src,    i)             -- a file name, or names then rows
   i = new(TAB, {rows = {}})
   for _, row in order(type(src) == "string" and csv(src) or src) do
@@ -184,7 +215,7 @@ function TAB.split(i,    rows,n,t,u1,u2) -- never shuffles i.rows
   for j,row in order(rows) do if j>n then t = u2 end; t[#t+1] = row end
   return u1, u2 end
 
--- ---- rmeans ----------------------------------------------------------
+-- ---- rmeans ----------------------------------------------------------
 function Bins(col,rows,y,all,    i,b) -- col's bins, and their worth
   i = new(BINS, {has = {}, w = 0})
   for _, row in order(rows) do
@@ -256,7 +287,7 @@ function NB.guess(i,row,    f)      -- row's likeliest klass
   f = function(sub) return i:like(sub, row) end
   return (best(i.subs, f)) end
 
--- ---- scoring ---------------------------------------------------------
+-- ---- scoring ---------------------------------------------------------
 function Bag()                      -- blank counts, for one test set
   return new(BAG, {n = 0, ok = 0, got = {}, want = {}, hit = {}}) end
 
@@ -286,39 +317,8 @@ function BAG.score(i,    k,pd,pf,d2h,r1,f1,d1) -- macro: one vote each
     k, pd, pf, d2h = k + 1, pd + r1, pf + f1, d2h + d1 end
   return 100*i.ok/i.n, 100*pd/k, 100*pf/k, d2h/k, k end
 
--- ---- stats -----------------------------------------------------------
-function Same(xs,ys,    f)          -- two samples, sorted, to compare
-  f = function(t,    u)             -- on copies: the caller's list is
-        u = map(t, same); table.sort(u); return u end -- not ours
-  return new(SAME, {xs = f(xs), ys = f(ys)}) end
 
-function SAME.ok(i)                 -- do all three tests say "same"?
-  return i:cohen() <= .35 and i:cliffs() <= .195 and i:ks() <= 1.36 end
-
-function SAME.cohen(i,    a,b,sd)   -- gap of means, in pooled sds
-  a, b = nums(i.xs, same), nums(i.ys, same)
-  sd = sqrt(((a.n - 1) * a:div() ^ 2
-             + (b.n - 1) * b:div() ^ 2) / (a.n + b.n - 2))
-  return abs(a.mu - b.mu) / (sd + 1e-32) end
-
-function SAME.cliffs(i,    xs,ys,gt,lt,j,k) -- how often xs out-ranks ys
-  xs, ys, gt, lt, j, k = i.xs, i.ys, 0, 0, 0, 0
-  for _, x in order(xs) do
-    while j < #ys and ys[j+1] <  x do j = j + 1; k = j end
-    while k < #ys and ys[k+1] == x do k = k + 1 end
-    gt, lt = gt + j, lt + #ys - k end
-  return abs(gt - lt) / (#xs * #ys) end
-
-function SAME.ks(i,    xs,ys,p,q,d,v) -- widest gap of two cdfs, in crits
-  xs, ys, p, q, d = i.xs, i.ys, 0, 0, 0
-  while p < #xs and q < #ys do
-    v = min(xs[p+1], ys[q+1])
-    while p < #xs and xs[p+1] == v do p = p + 1 end
-    while q < #ys and ys[q+1] == v do q = q + 1 end
-    d = max(d, abs(p/#xs - q/#ys)) end
-  return d / sqrt((#xs + #ys) / (#xs * #ys)) end
-
--- ---- start up ------------------------------------------------------
+-- ---- tests ------------------------------------------------------
 eg  = {}                           -- cli runs eg[action]; see --all
 function near(a,b) return abs(a - b) < 1e-6 end
 
@@ -353,11 +353,6 @@ eg["--all"] = function(    b4,keys) -- every test action, a-z order,
       keys[#keys + 1] = key end end
   for _, key in order(keys, lt) do the.seed = b4; eg[key]() end
   print("PASS " .. #keys .. " tests") end
-
--- ---- tests ---------------------------------------------------------
--- One per tab idea.  Each prints a tiny demo, then asserts golden
--- values.  Port tab to another language, pass these, and the port
--- agrees with this file to 1e-6 (same Park-Miller seed, same sums).
 
 eg["--thing"] = function()
   print("thing", thing" 42 ", thing"x", thing"4.2")
@@ -558,6 +553,7 @@ eg["--same"] = function(    xs,ys,zs,i)
   assert(near(i:ks(),     0.1581138830))
   assert(near(Same(xs, xs):cohen(), 0)) end
 
+-- ---- start ------------------------------------------------------
 for k, v in help:gmatch"\n%s+(%a+)=(%S+)" do the[k] = thing(v) end
 if (arg and arg[0] or ""):find"tab%.lua$" then
   if #arg == 0 then eg["-h"]() else cli() end end
