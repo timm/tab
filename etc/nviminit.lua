@@ -41,7 +41,7 @@ vim.keymap.set("n", "Q", ":quitall<CR>", { noremap = true, silent = true })
 vim.keymap.set("n", "<leader>s", ":set spell!<CR>", { silent = true })
 
 -- colors ------------------------------------------------------------
-vim.cmd.colorscheme("sorbet")
+pcall(vim.cmd.colorscheme, "lunaperche")  -- a miss must not stop us
 
 -- lisp indent: vim built-in + extra forms via lispwords -----------
 vim.api.nvim_create_autocmd("FileType", {

@@ -2,6 +2,7 @@
 -- vim: set ts=2 sw=2 sts=2 et cc=75 :
 local _ENV = setmetatable({}, {__index = _G})
 if setfenv then setfenv(1, _ENV) end   -- lua 5.1, luajit
+
 the,help = {}, [[
 tab.lua: a good guess from a few dozen labels.
 Range means, shrunk to the grand mean, weighed by variance.
@@ -317,12 +318,19 @@ function BAG.score(i,    k,pd,pf,d2h,r1,f1,d1) -- macro: one vote each
     k, pd, pf, d2h = k + 1, pd + r1, pf + f1, d2h + d1 end
   return 100*i.ok/i.n, 100*pd/k, 100*pf/k, d2h/k, k end
 
-
 -- ---- tests ------------------------------------------------------
 eg  = {}                           -- cli runs eg[action]; see --all
 function near(a,b) return abs(a - b) < 1e-6 end
 
 eg["-h"] = function() print(help) end
+
+eg["--all"] = function(    b4,keys) -- every test action, a-z order,
+  b4, keys = the.seed, {}           -- each from a fresh seed
+  for key in pairs(eg) do           -- skip the non-test actions:
+    if not (" -h --secs --all "):find(" "..key.." ", 1, true) then
+      keys[#keys + 1] = key end end
+  for _, key in order(keys, lt) do the.seed = b4; eg[key]() end
+  print("PASS " .. #keys .. " tests") end
 
 eg["--secs"] = function(  file,tbl,reps,tot,t0,tr,te,sub,y,model,lim,
                           seed)
@@ -345,14 +353,6 @@ eg["--secs"] = function(  file,tbl,reps,tot,t0,tr,te,sub,y,model,lim,
   print(string.format("%s rows=%6d secs=%.4f",
                       file:match"([^/]+)%.csv$", #tbl.rows,
                       tot / reps)) end
-
-eg["--all"] = function(    b4,keys) -- every test action, a-z order,
-  b4, keys = the.seed, {}           -- each from a fresh seed
-  for key in pairs(eg) do           -- skip the non-test actions:
-    if not (" -h --secs --all "):find(" "..key.." ", 1, true) then
-      keys[#keys + 1] = key end end
-  for _, key in order(keys, lt) do the.seed = b4; eg[key]() end
-  print("PASS " .. #keys .. " tests") end
 
 eg["--thing"] = function()
   print("thing", thing" 42 ", thing"x", thing"4.2")
@@ -555,6 +555,7 @@ eg["--same"] = function(    xs,ys,zs,i)
 
 -- ---- start ------------------------------------------------------
 for k, v in help:gmatch"\n%s+(%a+)=(%S+)" do the[k] = thing(v) end
+
 if (arg and arg[0] or ""):find"tab%.lua$" then
   if #arg == 0 then eg["-h"]() else cli() end end
 

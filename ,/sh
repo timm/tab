@@ -11,7 +11,14 @@ alias t='luajit tab.lua'
 alias eg='luajit tab-eg.lua'
 alias vi='nvim --clean -u "$Here/etc/nviminit.lua"'
 alias ..='cd ..'
-alias l='ls -lh'
+if ls --color=auto . >/dev/null 2>&1   # gnu coreutils, or busybox
+then Ls='ls --color=auto'
+else Ls='ls -G'; export CLICOLOR=1     # bsd, which macos ships
+     export LSCOLORS=ExGxFxdaCxDaDahbadacec
+fi
+alias ls="\$Ls"
+alias l="\$Ls -lh"
+alias ll="\$Ls -lhA"
 alias gs='git status -sb'
 alias gd='git diff --stat'
 HISTCONTROL=ignoredups:erasedups
