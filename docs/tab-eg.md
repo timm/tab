@@ -258,4 +258,3 @@ if (arg and arg[0] or ""):find"tab%-eg%.lua$" then
     io.stderr:write(the.file, ": ", tostring(err), "\n") end end
 return _ENV
 ```
-

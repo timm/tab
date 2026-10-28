@@ -663,7 +663,7 @@ eg["--tbl"] = function(    t)
   assert(near(t.cols[2]:div(), 104.269838)) end
 
 eg["--head"] = function(    t)
-  t = Tab{{"Age","HpX","speed-","klass!"}}
+  t = Tab{ {"Age","HpX","speed-","klass!"} }
   print("head", #t.x, #t.y, t.klass.txt)
   assert(#t.x == 1 and #t.y == 2)              -- HpX summarized, skipped
   assert(t.klass.txt == "klass!" and t.cols[3].w == 0)
@@ -735,10 +735,10 @@ eg["--chance"] = function(    t,y,few,model)
   assert(near(model:chance(model.has[t.x[2].at]), 0.0002607692)) end
 
 eg["--nb"] = function(    t,b,i)
-  t = Tab{{"Age","job","klass!"},
-          {20,"low","no"},  {22,"low","no"}, {25,"low","no"},
-          {30,"med","no"},  {60,"hi","yes"}, {62,"hi","yes"},
-          {65,"med","yes"}, {70,"hi","yes"}}
+  t = Tab{ {"Age","job","klass!"},
+           {20,"low","no"},  {22,"low","no"}, {25,"low","no"},
+           {30,"med","no"},  {60,"hi","yes"}, {62,"hi","yes"},
+           {65,"med","yes"}, {70,"hi","yes"} }
   b = t:clone(t.rows, "bin")
   i = Nb(b, b.rows)
   print("nb", i.nKlass, i:guess(b.rows[1]), i:guess(b.rows[8]))
@@ -749,8 +749,8 @@ eg["--nb"] = function(    t,b,i)
 
 eg["--bag"] = function(    i,tp,fp,fn,tn,acc,pd,pf,d2h,k)
   i = Bag()
-  for _, t in order{{"a","a"},{"a","b"},{"b","b"},{"b","b"},
-                     {"b","a"}} do i:tally(t[1], t[2]) end
+  for _, t in order{ {"a","a"},{"a","b"},{"b","b"},{"b","b"},
+                     {"b","a"} } do i:tally(t[1], t[2]) end
   tp, fp, fn, tn = i:parts"a"
   print("bag", tp, fp, fn, tn)
   assert(tp == 1 and fp == 1 and fn == 1 and tn == 2)
@@ -782,4 +782,3 @@ if (arg and arg[0] or ""):find"tab%.lua$" then
 
 return _ENV
 ```
-
