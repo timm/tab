@@ -48,9 +48,10 @@ function rint(n)                    -- 1..n, repeatable from the.seed
 function shuffle(t,    j)           -- in place, Fisher-Yates
   for k = #t, 2, -1 do j = rint(k); t[k], t[j] = t[j], t[k] end
   return t end
-function map(t,f,    u)             -- f(v,k) over t, in order; a nil
-  u={}; for k, v in ipairs(t) do u[#u+1] = f(v, k) end -- result is
-  return u end                                         -- dropped
+
+function map(t,f,    u)      -- f(v,k) over t,in order; nils are dropped
+  u={}; for k, v in ipairs(t) do u[#u+1] = f(v, k) end 
+  return u end                                        
 
 function sum(t,f,    n)             -- f(v,k) over t's items, added up
   n=0; for k, v in pairs(t) do n = n + f(v, k) end; return n end
