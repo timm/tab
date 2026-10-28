@@ -1,5 +1,7 @@
 # Lua, more
 
+<p align="center"><img src="logo.png" width="700"></p>
+
 The idioms that make `tab.lua` short. Read
 [lua101.md](lua101.md) first; this file assumes you know what a
 table is and what `:` does.
@@ -300,7 +302,7 @@ for n, row in order(rows, function(a,b) return g[a] < g[b] end) do
 
 -- 3. f is a number: sort on that cell of each item, so the items
 --    must themselves be tables (rows)
-for _, row in order({{3,"c"},{1,"a"},{2,"b"}}, 1) do ... end
+for _, row in order({ {3,"c"},{1,"a"},{2,"b"} }, 1) do ... end
 ```
 
 Form 3 has no call site in the repo yet -- it is there because

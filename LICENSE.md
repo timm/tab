@@ -1,5 +1,7 @@
 # MIT License
 
+<p align="center"><img src="docs/logo.png" width="700"></p>
+
 Copyright (c) 2026 Tim Menzies <timm@ieee.org>
 
 Permission is hereby granted, free of charge, to any person

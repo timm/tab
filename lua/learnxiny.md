@@ -1,5 +1,7 @@
 # Learn Lua in Y minutes, from tab.lua
 
+<p align="center"><img src="../docs/logo.png" width="700"></p>
+
 In the shape of [learnxinyminutes.com/lua](https://learnxinyminutes.com/lua/)
 (by Tyler Neylon, CC BY-SA 3.0), but every example is real code from
 `tab.lua` -- 563 lines that read csv files, discretize columns, run
@@ -117,7 +119,7 @@ ok, line = pcall(fun, pair(tbl, s))  -- pair returns 2; both expand
 os.getenv"HOME"                     -- os.getenv("HOME")
 s:match"^%s*(.-)%s*$"               -- s:match("...")
 i:add"?"                            -- i:add("?")
-Tab{{"Age","job","klass!"}}         -- Tab({{...}})
+Tab{ {"Age","job","klass!"} }       -- Tab({ {...} })
 
 -- Those odd parameter lists -- `function sum(t,f,    n)` -- are a
 -- house style. Everything after the gap is a LOCAL, declared as a

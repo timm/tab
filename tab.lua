@@ -1,5 +1,5 @@
 #!/usr/bin/env lua
--- vim: set ts=2 sw=2 sts=2 et cc=75 :
+-- <!--- vim: set ts=2 sw=2 sts=2 et cc=75 : --> 
 local _ENV = setmetatable({}, {__index = _G})
 if setfenv then setfenv(1, _ENV) end   -- lua 5.1, luajit
 
@@ -20,9 +20,9 @@ flags:
   file=~/gits/moot/optimize/misc/auto93.csv
 
 actions:
-  -h               print help
-  --secs           time rmeans: train, then guess
-  --all            unit tests (--num, --split ... run just one)]]
+   -h              print help
+   --secs          time rmeans: train, then guess
+   --all           unit tests (--num, --split ... run just one)]]
 
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max

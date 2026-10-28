@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# html: pycco some lua into docs/.  usage: ./html [file.lua ...]
+# With no arguments, does the lot.  etc/hoist.awk goes first (see its
+# head for why), then its %%DD%% markers come back out of the html.
+# The temp copy keeps each name: tab.lua's main guard tests arg[0].
+cd "$(git rev-parse --show-toplevel)" || exit 1
+[ $# -gt 0 ] && files=("$@") || files=(tab.lua tab-eg.lua)
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+for f in "${files[@]}"; do
+  b=$(basename "$f" .lua)
+  awk -f etc/hoist.awk "$f" > "$tmp/$b.lua"  || exit 1
+  pycco -d docs "$tmp/$b.lua"                || exit 1
+  sed -i '' "s|%%DD%%|--|g; s|<div class='docs'><h1>|<div class='docs'>\\
+<p class='logo'><a href='index.html'><img src='logo.png' \\
+width='460'></a></p><h1>|" "docs/$b.html"
+done
+grep -q '^.docs p' docs/pycco.css || cat >> docs/pycco.css <<'CSS'
+.docs p   {text-align:right;}    /* the prose column, not the logo */
+p.logo    {text-align:center; margin:0}   /* in the docs column */
+CSS

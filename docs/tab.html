@@ -9,7 +9,9 @@
 <div id='container'>
   <div id="background"></div>
   <div class='section'>
-    <div class='docs'><h1>tab.lua</h1></div>
+    <div class='docs'>
+<p class='logo'><a href='index.html'><img src='logo.png' 
+width='460'></a></p><h1>tab.lua</h1></div>
   </div>
   <div class='clearall'>
   <div class='section' id='section-0'>
@@ -17,30 +19,37 @@
       <div class='octowrap'>
         <a class='octothorpe' href='#section-0'>#</a>
       </div>
-      <p>vim: set ts=2 sw=2 sts=2 et cc=75 :</p>
+      <!--- vim: set ts=2 sw=2 sts=2 et cc=75 : -->
     </div>
     <div class='code'>
       <div class="highlight"><pre><span></span><span class="kd">local</span><span class="w"> </span><span class="nv">_ENV</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">setmetatable</span><span class="p">({},</span><span class="w"> </span><span class="p">{</span><span class="nv">__index</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">_G</span><span class="p">})</span>
 <span class="kr">if</span><span class="w"> </span><span class="nv">setfenv</span><span class="w"> </span><span class="kr">then</span><span class="w"> </span><span class="nf">setfenv</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nv">_ENV</span><span class="p">)</span><span class="w"> </span><span class="kr">end</span><span class="w">   </span><span class="c1">-- lua 5.1, luajit</span>
 
-<span class="nv">the</span><span class="p">,</span><span class="nv">help</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{},</span><span class="w"> </span><span class="p">[[</span>
-<span class="nv">tab</span><span class="p">.</span><span class="py">lua</span><span class="p">:</span><span class="w"> </span><span class="py">a</span><span class="w"> </span><span class="nv">good</span><span class="w"> </span><span class="nv">guess</span><span class="w"> </span><span class="nv">from</span><span class="w"> </span><span class="nv">a</span><span class="w"> </span><span class="nv">few</span><span class="w"> </span><span class="nv">dozen</span><span class="w"> </span><span class="nv">labels</span><span class="p">.</span>
-<span class="py">Range</span><span class="w"> </span><span class="nv">means</span><span class="p">,</span><span class="w"> </span><span class="nv">shrunk</span><span class="w"> </span><span class="nv">to</span><span class="w"> </span><span class="nv">the</span><span class="w"> </span><span class="nv">grand</span><span class="w"> </span><span class="nv">mean</span><span class="p">,</span><span class="w"> </span><span class="nv">weighed</span><span class="w"> </span><span class="nv">by</span><span class="w"> </span><span class="nv">variance</span><span class="p">.</span>
-<span class="err">(</span><span class="py">c</span><span class="p">)</span><span class="w"> </span><span class="mi">2026</span><span class="w"> </span><span class="nv">Tim</span><span class="w"> </span><span class="nv">Menzies</span><span class="w"> </span><span class="o">&lt;</span><span class="nv">timm</span><span class="err">@</span><span class="nv">ieee</span><span class="p">.</span><span class="py">org</span><span class="o">&gt;</span><span class="w"> </span><span class="nv">MIT</span><span class="w"> </span><span class="nv">license</span><span class="p">.</span>
+<span class="nv">the</span><span class="p">,</span><span class="nv">help</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{},</span><span class="w"> </span><span class="s">[[</span>
+<span class="s">tab.lua: a good guess from a few dozen labels.</span>
+<span class="s">Range means, shrunk to the grand mean, weighed by variance.</span>
+<span class="s">(c) 2026 Tim Menzies &lt;timm@ieee.org&gt; MIT license.</span>
 
-<span class="py">usage</span><span class="p">:</span><span class="w"> </span><span class="py">lua</span><span class="w"> </span><span class="nv">tab</span><span class="p">.</span><span class="py">lua</span><span class="w"> </span><span class="p">[</span><span class="nv">name</span><span class="o">=</span><span class="nv">value</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="nv">action</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="nv">file</span><span class="p">.</span><span class="py">csv</span><span class="w"> </span><span class="o">..</span><span class="p">.]</span>
+<span class="s">usage: lua tab.lua [name=value | action | file.csv ...]</span>
 
-<span class="nv">flags</span><span class="p">:</span>
-<span class="w">  </span><span class="py">bins</span><span class="o">=</span><span class="mi">7</span><span class="w">           </span><span class="nv">numeric</span><span class="w"> </span><span class="nv">columns</span><span class="w"> </span><span class="nv">get</span><span class="w"> </span><span class="nv">this</span><span class="w"> </span><span class="nv">many</span><span class="w"> </span><span class="nv">bins</span>
-<span class="w">  </span><span class="nv">budget</span><span class="o">=</span><span class="mi">50</span><span class="w">        </span><span class="nv">labels</span><span class="p">,</span><span class="w"> </span><span class="nv">all</span><span class="w"> </span><span class="kr">in</span>
-<span class="w">  </span><span class="nv">check</span><span class="o">=</span><span class="mi">5</span><span class="w">          </span><span class="nv">of</span><span class="w"> </span><span class="nv">those</span><span class="p">,</span><span class="w"> </span><span class="nv">saved</span><span class="w"> </span><span class="kr">for</span><span class="w"> </span><span class="nv">the</span><span class="w"> </span><span class="nv">test</span><span class="w"> </span><span class="nv">rows</span>
-<span class="w">  </span><span class="nv">m</span><span class="o">=</span><span class="mi">2</span><span class="w">              </span><span class="nv">m</span><span class="o">-</span><span class="nv">estimate</span><span class="p">:</span><span class="w"> </span><span class="py">prior</span><span class="w"> </span><span class="nv">weight</span><span class="w"> </span><span class="kr">for</span><span class="w"> </span><span class="nv">a</span><span class="w"> </span><span class="nv">thin</span><span class="w"> </span><span class="nv">bin</span>
-<span class="w">  </span><span class="nv">p</span><span class="o">=</span><span class="mi">2</span><span class="w">              </span><span class="nv">minkowski</span><span class="w"> </span><span class="nv">coefficient</span>
-<span class="w">  </span><span class="nv">seed</span><span class="o">=</span><span class="mi">1234567891</span><span class="w">  </span><span class="nv">random</span><span class="w"> </span><span class="nv">number</span><span class="w"> </span><span class="nv">seed</span>
-<span class="w">  </span><span class="nv">file</span><span class="o">=~/</span><span class="nv">gits</span><span class="o">/</span><span class="nv">moot</span><span class="o">/</span><span class="nv">optimize</span><span class="o">/</span><span class="nv">misc</span><span class="o">/</span><span class="nv">auto93</span><span class="p">.</span><span class="py">csv</span>
+<span class="s">flags:</span>
+<span class="s">  bins=7           numeric columns get this many bins</span>
+<span class="s">  budget=50        labels, all in</span>
+<span class="s">  check=5          of those, saved for the test rows</span>
+<span class="s">  m=2              m-estimate: prior weight for a thin bin</span>
+<span class="s">  p=2              minkowski coefficient</span>
+<span class="s">  seed=1234567891  random number seed</span>
+<span class="s">  file=~/gits/moot/optimize/misc/auto93.csv</span>
 
-<span class="nv">actions</span><span class="p">:</span>
-<span class="w">  </span><span class="err">-</span><span class="py">h</span><span class="w">               </span><span class="nb">print</span><span class="w"> </span><span class="nv">help</span></pre></div>
+<span class="s">actions:</span>
+<span class="s">   -h              print help</span>
+<span class="s">   --secs          time rmeans: train, then guess</span>
+<span class="s">   --all           unit tests (--num, --split ... run just one)]]</span>
+
+<span class="nv">floor</span><span class="p">,</span><span class="w"> </span><span class="nv">exp</span><span class="p">,</span><span class="w"> </span><span class="nv">sqrt</span><span class="p">,</span><span class="w"> </span><span class="nv">log</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">math.floor</span><span class="p">,</span><span class="w"> </span><span class="nb">math.exp</span><span class="p">,</span><span class="w"> </span><span class="nb">math.sqrt</span><span class="p">,</span><span class="w"> </span><span class="nb">math.log</span>
+<span class="nv">abs</span><span class="p">,</span><span class="w"> </span><span class="nv">min</span><span class="p">,</span><span class="w"> </span><span class="nv">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">math.abs</span><span class="p">,</span><span class="w"> </span><span class="nb">math.min</span><span class="p">,</span><span class="w"> </span><span class="nb">math.max</span>
+
+<span class="nv">TAB</span><span class="p">,</span><span class="nv">NUM</span><span class="p">,</span><span class="nv">SYM</span><span class="p">,</span><span class="nv">BINS</span><span class="p">,</span><span class="nv">RMEANS</span><span class="p">,</span><span class="nv">NB</span><span class="p">,</span><span class="nv">BAG</span><span class="p">,</span><span class="nv">SAME</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{},{},{},{},{},{},{},{}</span></pre></div>
     </div>
   </div>
   <div class='clearall'></div>
@@ -49,24 +58,8 @@
       <div class='octowrap'>
         <a class='octothorpe' href='#section-1'>#</a>
       </div>
-      <p>secs           time rmeans: train, then guess
-all            unit tests (&ndash;num, &ndash;split &hellip; run just one)]]</p>
-    </div>
-    <div class='code'>
-      <div class="highlight"><pre><span class="nv">floor</span><span class="p">,</span><span class="w"> </span><span class="nv">exp</span><span class="p">,</span><span class="w"> </span><span class="nv">sqrt</span><span class="p">,</span><span class="w"> </span><span class="nv">log</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">math.floor</span><span class="p">,</span><span class="w"> </span><span class="nb">math.exp</span><span class="p">,</span><span class="w"> </span><span class="nb">math.sqrt</span><span class="p">,</span><span class="w"> </span><span class="nb">math.log</span>
-<span class="nv">abs</span><span class="p">,</span><span class="w"> </span><span class="nv">min</span><span class="p">,</span><span class="w"> </span><span class="nv">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">math.abs</span><span class="p">,</span><span class="w"> </span><span class="nb">math.min</span><span class="p">,</span><span class="w"> </span><span class="nb">math.max</span>
-
-<span class="nv">TAB</span><span class="p">,</span><span class="nv">NUM</span><span class="p">,</span><span class="nv">SYM</span><span class="p">,</span><span class="nv">BINS</span><span class="p">,</span><span class="nv">RMEANS</span><span class="p">,</span><span class="nv">NB</span><span class="p">,</span><span class="nv">BAG</span><span class="p">,</span><span class="nv">SAME</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{},{},{},{},{},{},{},{}</span></pre></div>
-    </div>
-  </div>
-  <div class='clearall'></div>
-  <div class='section' id='section-2'>
-    <div class='docs'>
-      <div class='octowrap'>
-        <a class='octothorpe' href='#section-2'>#</a>
-      </div>
-      <p>---- misc ---------------------------------------------------------
-i is now one of meta&rsquo;s kind</p>
+      <h2>misc</h2>
+<p>i is now one of meta&rsquo;s kind</p>
     </div>
     <div class='code'>
       <div class="highlight"><pre><span class="kr">function</span><span class="w"> </span><span class="nf">new</span><span class="p">(</span><span class="nv">meta</span><span class="p">,</span><span class="nv">i</span><span class="p">)</span>
@@ -74,10 +67,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-3'>
+  <div class='section' id='section-2'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-3'>#</a>
+        <a class='octothorpe' href='#section-2'>#</a>
       </div>
       <p>awk-ish operands, left to right:</p>
     </div>
@@ -92,10 +85,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-4'>
+  <div class='section' id='section-3'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-4'>#</a>
+        <a class='octothorpe' href='#section-3'>#</a>
       </div>
       <p>1..n, repeatable from the.seed</p>
     </div>
@@ -106,10 +99,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-5'>
+  <div class='section' id='section-4'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-5'>#</a>
+        <a class='octothorpe' href='#section-4'>#</a>
       </div>
       <p>in place, Fisher-Yates</p>
     </div>
@@ -120,10 +113,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-6'>
+  <div class='section' id='section-5'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-6'>#</a>
+        <a class='octothorpe' href='#section-5'>#</a>
       </div>
       <p>f(v,k) over t,in order; nils are dropped</p>
     </div>
@@ -134,10 +127,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-7'>
+  <div class='section' id='section-6'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-7'>#</a>
+        <a class='octothorpe' href='#section-6'>#</a>
       </div>
       <p>f(v,k) over t&rsquo;s items, added up</p>
     </div>
@@ -147,10 +140,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-8'>
+  <div class='section' id='section-7'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-8'>#</a>
+        <a class='octothorpe' href='#section-7'>#</a>
       </div>
       <p>the k, and biggest f(v,k), in t</p>
     </div>
@@ -163,10 +156,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-9'>
+  <div class='section' id='section-8'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-9'>#</a>
+        <a class='octothorpe' href='#section-8'>#</a>
       </div>
       <p>identity</p>
     </div>
@@ -175,10 +168,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-10'>
+  <div class='section' id='section-9'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-10'>#</a>
+        <a class='octothorpe' href='#section-9'>#</a>
       </div>
       <p>ascending, for order</p>
     </div>
@@ -187,10 +180,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-11'>
+  <div class='section' id='section-10'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-11'>#</a>
+        <a class='octothorpe' href='#section-10'>#</a>
       </div>
       <p>ipairs; or, given f, a sorted</p>
     </div>
@@ -203,10 +196,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-12'>
+  <div class='section' id='section-11'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-12'>#</a>
+        <a class='octothorpe' href='#section-11'>#</a>
       </div>
       <p>one cell: number, or the string</p>
     </div>
@@ -220,10 +213,10 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-13'>
+  <div class='section' id='section-12'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-13'>#</a>
+        <a class='octothorpe' href='#section-12'>#</a>
       </div>
       <p>first row is the names</p>
     </div>
@@ -237,13 +230,13 @@ i is now one of meta&rsquo;s kind</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-14'>
+  <div class='section' id='section-13'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-14'>#</a>
+        <a class='octothorpe' href='#section-13'>#</a>
       </div>
-      <p>---- stats -----------------------------------------------------------
-two samples, sorted, to compare</p>
+      <h2>stats</h2>
+<p>two samples, sorted, to compare</p>
     </div>
     <div class='code'>
       <div class="highlight"><pre><span class="kr">function</span><span class="w"> </span><span class="nf">Same</span><span class="p">(</span><span class="nv">xs</span><span class="p">,</span><span class="nv">ys</span><span class="p">,</span><span class="w">    </span><span class="nv">f</span><span class="p">)</span>
@@ -253,10 +246,10 @@ two samples, sorted, to compare</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-15'>
+  <div class='section' id='section-14'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-15'>#</a>
+        <a class='octothorpe' href='#section-14'>#</a>
       </div>
       <p>do all three tests say &ldquo;same&rdquo;?</p>
     </div>
@@ -266,10 +259,10 @@ two samples, sorted, to compare</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-16'>
+  <div class='section' id='section-15'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-16'>#</a>
+        <a class='octothorpe' href='#section-15'>#</a>
       </div>
       <p>gap of means, in pooled sds</p>
     </div>
@@ -282,10 +275,10 @@ two samples, sorted, to compare</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-17'>
+  <div class='section' id='section-16'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-17'>#</a>
+        <a class='octothorpe' href='#section-16'>#</a>
       </div>
       <p>how often xs out-ranks ys</p>
     </div>
@@ -300,10 +293,10 @@ two samples, sorted, to compare</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-18'>
+  <div class='section' id='section-17'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-18'>#</a>
+        <a class='octothorpe' href='#section-17'>#</a>
       </div>
       <p>widest gap of two cdfs, in crits</p>
     </div>
@@ -319,13 +312,13 @@ two samples, sorted, to compare</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-19'>
+  <div class='section' id='section-18'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-19'>#</a>
+        <a class='octothorpe' href='#section-18'>#</a>
       </div>
-      <p>---- columns ---------------------------------------------------------
-NUM and SYM share one protocol: add, div, norm, bin.  Each verb&rsquo;s
+      <h2>columns</h2>
+<p>NUM and SYM share one protocol: add, div, norm, bin.  Each verb&rsquo;s
 two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
     <div class='code'>
@@ -333,10 +326,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-20'>
+  <div class='section' id='section-19'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-20'>#</a>
+        <a class='octothorpe' href='#section-19'>#</a>
       </div>
       <p>! + -: goals.  X: skip.  A-Z: num</p>
     </div>
@@ -348,10 +341,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-21'>
+  <div class='section' id='section-20'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-21'>#</a>
+        <a class='octothorpe' href='#section-20'>#</a>
       </div>
       <p>a-z names; counts, not Welford</p>
     </div>
@@ -363,10 +356,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-22'>
+  <div class='section' id='section-21'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-22'>#</a>
+        <a class='octothorpe' href='#section-21'>#</a>
       </div>
       <p>lst, summarized in one num</p>
     </div>
@@ -376,10 +369,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-23'>
+  <div class='section' id='section-22'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-23'>#</a>
+        <a class='octothorpe' href='#section-22'>#</a>
       </div>
       <p>Welford&rsquo;s running mean and sd</p>
     </div>
@@ -393,10 +386,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-24'>
+  <div class='section' id='section-23'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-24'>#</a>
+        <a class='octothorpe' href='#section-23'>#</a>
       </div>
       <p>one more of v</p>
     </div>
@@ -408,10 +401,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-25'>
+  <div class='section' id='section-24'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-25'>#</a>
+        <a class='octothorpe' href='#section-24'>#</a>
       </div>
       <p>standard deviation</p>
     </div>
@@ -421,10 +414,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-26'>
+  <div class='section' id='section-25'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-26'>#</a>
+        <a class='octothorpe' href='#section-25'>#</a>
       </div>
       <p>entropy</p>
     </div>
@@ -435,10 +428,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-27'>
+  <div class='section' id='section-26'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-27'>#</a>
+        <a class='octothorpe' href='#section-26'>#</a>
       </div>
       <p>logistic cdf, clipped at 3 sds</p>
     </div>
@@ -451,10 +444,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-28'>
+  <div class='section' id='section-27'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-28'>#</a>
+        <a class='octothorpe' href='#section-27'>#</a>
       </div>
       <p>syms pass through</p>
     </div>
@@ -463,10 +456,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-29'>
+  <div class='section' id='section-28'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-29'>#</a>
+        <a class='octothorpe' href='#section-28'>#</a>
       </div>
       <p>1..the.bins</p>
     </div>
@@ -478,10 +471,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-30'>
+  <div class='section' id='section-29'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-30'>#</a>
+        <a class='octothorpe' href='#section-29'>#</a>
       </div>
       <p>a sym is its own bin</p>
     </div>
@@ -490,10 +483,10 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-31'>
+  <div class='section' id='section-30'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-31'>#</a>
+        <a class='octothorpe' href='#section-30'>#</a>
       </div>
       <p>how many values i has seen;</p>
     </div>
@@ -505,13 +498,13 @@ two faces sit together below.  nVals is SYM&rsquo;s alone.</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-32'>
+  <div class='section' id='section-31'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-32'>#</a>
+        <a class='octothorpe' href='#section-31'>#</a>
       </div>
-      <p>---- tables ----------------------------------------------------------
-a file name, or names then rows</p>
+      <h2>tables</h2>
+<p>a file name, or names then rows</p>
     </div>
     <div class='code'>
       <div class="highlight"><pre><span class="kr">function</span><span class="w"> </span><span class="nf">Tab</span><span class="p">(</span><span class="nv">src</span><span class="p">,</span><span class="w">    </span><span class="nv">i</span><span class="p">)</span>
@@ -522,10 +515,10 @@ a file name, or names then rows</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-33'>
+  <div class='section' id='section-32'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-33'>#</a>
+        <a class='octothorpe' href='#section-32'>#</a>
       </div>
       <p>the first row, read as names</p>
     </div>
@@ -542,10 +535,10 @@ a file name, or names then rows</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-34'>
+  <div class='section' id='section-33'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-34'>#</a>
+        <a class='octothorpe' href='#section-33'>#</a>
       </div>
       <p>first row is the names</p>
     </div>
@@ -558,10 +551,10 @@ a file name, or names then rows</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-35'>
+  <div class='section' id='section-34'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-35'>#</a>
+        <a class='octothorpe' href='#section-34'>#</a>
       </div>
       <p>same header, fresh summaries</p>
     </div>
@@ -576,10 +569,10 @@ a file name, or names then rows</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-36'>
+  <div class='section' id='section-35'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-36'>#</a>
+        <a class='octothorpe' href='#section-35'>#</a>
       </div>
       <p>goals to heaven; 0 is best</p>
     </div>
@@ -591,10 +584,10 @@ a file name, or names then rows</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-37'>
+  <div class='section' id='section-36'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-37'>#</a>
+        <a class='octothorpe' href='#section-36'>#</a>
       </div>
       <p>never shuffles i.rows</p>
     </div>
@@ -608,13 +601,13 @@ a file name, or names then rows</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-38'>
+  <div class='section' id='section-37'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-38'>#</a>
+        <a class='octothorpe' href='#section-37'>#</a>
       </div>
-      <p>---- rmeans ----------------------------------------------------------
-col&rsquo;s bins, and their worth</p>
+      <h2>rmeans</h2>
+<p>col&rsquo;s bins, and their worth</p>
     </div>
     <div class='code'>
       <div class="highlight"><pre><span class="kr">function</span><span class="w"> </span><span class="nf">Bins</span><span class="p">(</span><span class="nv">col</span><span class="p">,</span><span class="nv">rows</span><span class="p">,</span><span class="nv">y</span><span class="p">,</span><span class="nv">all</span><span class="p">,</span><span class="w">    </span><span class="nv">i</span><span class="p">,</span><span class="nv">b</span><span class="p">)</span>
@@ -628,10 +621,10 @@ col&rsquo;s bins, and their worth</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-39'>
+  <div class='section' id='section-38'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-39'>#</a>
+        <a class='octothorpe' href='#section-38'>#</a>
       </div>
       <p>variance i&rsquo;s bins cut off</p>
     </div>
@@ -643,10 +636,10 @@ col&rsquo;s bins, and their worth</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-40'>
+  <div class='section' id='section-39'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-40'>#</a>
+        <a class='octothorpe' href='#section-39'>#</a>
       </div>
       <p>one bins per x column</p>
     </div>
@@ -661,10 +654,10 @@ col&rsquo;s bins, and their worth</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-41'>
+  <div class='section' id='section-40'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-41'>#</a>
+        <a class='octothorpe' href='#section-40'>#</a>
       </div>
       <p>bin means, m-estimated,</p>
     </div>
@@ -682,10 +675,10 @@ col&rsquo;s bins, and their worth</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-42'>
+  <div class='section' id='section-41'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-42'>#</a>
+        <a class='octothorpe' href='#section-41'>#</a>
       </div>
       <p>after training, keep only</p>
     </div>
@@ -701,10 +694,10 @@ col&rsquo;s bins, and their worth</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-43'>
+  <div class='section' id='section-42'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-43'>#</a>
+        <a class='octothorpe' href='#section-42'>#</a>
       </div>
       <p>variance k random bins would cut</p>
     </div>
@@ -716,13 +709,13 @@ col&rsquo;s bins, and their worth</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-44'>
+  <div class='section' id='section-43'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-44'>#</a>
+        <a class='octothorpe' href='#section-43'>#</a>
       </div>
-      <p>---- bayes -----------------------------------------------------------
-one sub-table per klass, and</p>
+      <h2>bayes</h2>
+<p>one sub-table per klass, and</p>
     </div>
     <div class='code'>
       <div class="highlight"><pre><span class="kr">function</span><span class="w"> </span><span class="nf">Nb</span><span class="p">(</span><span class="nv">tbl</span><span class="p">,</span><span class="nv">rows</span><span class="p">,</span><span class="w">    </span><span class="nv">i</span><span class="p">,</span><span class="nv">col</span><span class="p">,</span><span class="nv">v</span><span class="p">)</span>
@@ -737,10 +730,10 @@ one sub-table per klass, and</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-45'>
+  <div class='section' id='section-44'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-45'>#</a>
+        <a class='octothorpe' href='#section-44'>#</a>
       </div>
       <p>log P(row|sub), m-estimated</p>
     </div>
@@ -756,10 +749,10 @@ one sub-table per klass, and</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-46'>
+  <div class='section' id='section-45'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-46'>#</a>
+        <a class='octothorpe' href='#section-45'>#</a>
       </div>
       <p>row&rsquo;s likeliest klass</p>
     </div>
@@ -770,13 +763,13 @@ one sub-table per klass, and</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-47'>
+  <div class='section' id='section-46'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-47'>#</a>
+        <a class='octothorpe' href='#section-46'>#</a>
       </div>
-      <p>---- scoring ---------------------------------------------------------
-blank counts, for one test set</p>
+      <h2>scoring</h2>
+<p>blank counts, for one test set</p>
     </div>
     <div class='code'>
       <div class="highlight"><pre><span class="kr">function</span><span class="w"> </span><span class="nf">Bag</span><span class="p">()</span>
@@ -784,10 +777,10 @@ blank counts, for one test set</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-48'>
+  <div class='section' id='section-47'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-48'>#</a>
+        <a class='octothorpe' href='#section-47'>#</a>
       </div>
       <p>one guess, into the bag</p>
     </div>
@@ -801,10 +794,10 @@ blank counts, for one test set</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-49'>
+  <div class='section' id='section-48'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-49'>#</a>
+        <a class='octothorpe' href='#section-48'>#</a>
       </div>
       <p>x&rsquo;s tp, fp, fn, tn, so far</p>
     </div>
@@ -817,10 +810,10 @@ blank counts, for one test set</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-50'>
+  <div class='section' id='section-49'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-50'>#</a>
+        <a class='octothorpe' href='#section-49'>#</a>
       </div>
       <p>x&rsquo;s pd, pf, and d2h</p>
     </div>
@@ -833,10 +826,10 @@ blank counts, for one test set</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-51'>
+  <div class='section' id='section-50'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-51'>#</a>
+        <a class='octothorpe' href='#section-50'>#</a>
       </div>
       <p>macro: one vote each</p>
     </div>
@@ -850,12 +843,12 @@ blank counts, for one test set</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-52'>
+  <div class='section' id='section-51'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-52'>#</a>
+        <a class='octothorpe' href='#section-51'>#</a>
       </div>
-      <p>---- tests ------------------------------------------------------</p>
+      <h2>tests</h2>
     </div>
     <div class='code'>
       <div class="highlight"><pre><span class="nv">eg</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">{}</span><span class="w">                           </span><span class="c1">-- cli runs eg[action]; see --all</span>
@@ -1094,12 +1087,12 @@ blank counts, for one test set</p>
     </div>
   </div>
   <div class='clearall'></div>
-  <div class='section' id='section-53'>
+  <div class='section' id='section-52'>
     <div class='docs'>
       <div class='octowrap'>
-        <a class='octothorpe' href='#section-53'>#</a>
+        <a class='octothorpe' href='#section-52'>#</a>
       </div>
-      <p>---- start ------------------------------------------------------</p>
+      <h2>start</h2>
     </div>
     <div class='code'>
       <div class="highlight"><pre><span class="kr">for</span><span class="w"> </span><span class="nv">k</span><span class="p">,</span><span class="w"> </span><span class="nv">v</span><span class="w"> </span><span class="kr">in</span><span class="w"> </span><span class="nv">help</span><span class="p">:</span><span class="py">gmatch</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">%s+(%a+)=(%S+)&quot;</span><span class="w"> </span><span class="kr">do</span><span class="w"> </span><span class="nv">the</span><span class="p">[</span><span class="nv">k</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nf">thing</span><span class="p">(</span><span class="nv">v</span><span class="p">)</span><span class="w"> </span><span class="kr">end</span>
