@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# md: lua in, literate markdown out, into docs/.
+# usage: ./md [file.lua ...]     (no arguments: do the lot)
+cd "$(git rev-parse --show-toplevel)" || exit 1
+[ $# -gt 0 ] && files=("$@") || files=(tab.lua tab-eg.lua)
+# Every page opens with README's logo and menubar.  README is the
+# one copy of those; its links are relative to the root, so moving
+# them into docs/ means dropping one level and adding another.
+head=$(gawk 'BEGIN {RS = ""; FS = "\n"}
+             $1 ~ /^#/      {next}
+             $1 ~ /^(<|\[)/ {print $0 "\n"; next}
+                            {exit}' README.md |
+       sed 's|](docs/|](|g; s|src="docs/|src="|g; s|](lua/|](../lua/|g')
+for f in "${files[@]}"; do
+  b=$(basename "$f" .lua)
+  { printf '%s\n\n' "$head"
+    printf '# %s\n\n' "$f"
+    gawk -f etc/lit.awk "$f"; } > "docs/$b.md"; done
+ls -l docs/*.md

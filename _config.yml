@@ -1,23 +1,19 @@
-# github pages serves this repo from the main branch, root folder,
-# so README.md is the home page (via the jekyll-readme-index plugin,
-# which pages enables by default).  The tutorials need no front
-# matter: jekyll-optional-front-matter renders them anyway, and
-# jekyll-relative-links rewrites their .md links to .html.  The
-# pycco output has no front matter, so jekyll copies it untouched --
-# which is what keeps its {{ }} out of liquid's hands.
-# a project page lives at timm.github.io/tab, so every generated
-# link needs that prefix; without it they point at the host root.
-baseurl: /tab
-# the h1 becomes the page title, so drop it from the body or every
-# page shows its name twice.
-titles_from_headings:
-  strip_title: true
-title: tab
-description: a good guess from a few dozen labels
-theme: minima
+# Pages serves this from main, root folder, so README.md is the home
+# page.  Everything else is markdown too, which means github.com
+# renders it the moment it is pushed, without waiting for a build.
+# Of the settings below, only the first three change the build:
+# without a theme the site has no css at all; without a baseurl the
+# links point at the host root, not at the project; and the theme
+# prints the title that strip_title takes out of the body.
+baseurl:     /tab
+theme:       minima
+titles_from_headings: {strip_title: true}
 
-# pages turns these on by default; naming them lets `jekyll build`
-# reproduce the live site locally.
+title:       tab
+description: a good guess from a few dozen labels
+
+# Pages turns these five on by default, so this line is only here to
+# let a local `jekyll build` reproduce the live site.
 plugins: [jekyll-readme-index, jekyll-optional-front-matter,
           jekyll-relative-links, jekyll-default-layout,
           jekyll-titles-from-headings]

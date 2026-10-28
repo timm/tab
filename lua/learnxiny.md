@@ -1,6 +1,13 @@
-# Learn Lua in Y minutes, from tab.lua
-
 <p align="center"><img src="../docs/logo.png" width="700"></p>
+
+[lua 101](../docs/lua101.md) ·
+[lua, more](../docs/luamore.md) ·
+[learn x in y](learnxiny.md) ·
+[tab.lua](../docs/tab.md) ·
+[tab-eg.lua](../docs/tab-eg.md) ·
+[license](https://github.com/timm/tab/blob/main/LICENSE.md)
+
+# Learn Lua in Y minutes, from tab.lua
 
 In the shape of [learnxinyminutes.com/lua](https://learnxinyminutes.com/lua/)
 (by Tyler Neylon, CC BY-SA 3.0), but every example is real code from

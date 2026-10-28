@@ -1,6 +1,13 @@
-# MIT License
-
 <p align="center"><img src="docs/logo.png" width="700"></p>
+
+[lua 101](docs/lua101.md) ·
+[lua, more](docs/luamore.md) ·
+[learn x in y](lua/learnxiny.md) ·
+[tab.lua](docs/tab.md) ·
+[tab-eg.lua](docs/tab-eg.md) ·
+[license](https://github.com/timm/tab/blob/main/LICENSE.md)
+
+# MIT License
 
 Copyright (c) 2026 Tim Menzies <timm@ieee.org>
 

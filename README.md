@@ -5,8 +5,8 @@
 [lua 101](docs/lua101.md) ·
 [lua, more](docs/luamore.md) ·
 [learn x in y](lua/learnxiny.md) ·
-[tab.lua](https://timm.github.io/tab/docs/tab.html) ·
-[tab-eg.lua](https://timm.github.io/tab/docs/tab-eg.html) ·
+[tab.lua](docs/tab.md) ·
+[tab-eg.lua](docs/tab-eg.md) ·
 [license](https://github.com/timm/tab/blob/main/LICENSE.md)
 
 A good guess from a few dozen labels. Range means, shrunk to the
@@ -15,12 +15,12 @@ grand mean, weighed by variance. Lua, no dependencies, one file.
     tab.lua       the learner
     tab-eg.lua    the rigs
     ,/            the common scripts: sh (work shell), run (parallel
-                  experiments), html (pycco the source), pdf,
+                  experiments), md (lua to markdown), pdf,
                   push (save upstream)
     bin/          the installed command (see the rockspec)
     etc/          support code and config (lgbm.py, nn.py, charts.py ...)
     lua/          learn x in y minutes, in tab.lua
-    docs/         the figures, the tutorials, the pycco html
+    docs/         the figures, the tutorials, the literate source
 
 ## Install
 
