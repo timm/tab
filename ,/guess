@@ -56,10 +56,10 @@ echo "asking claude about $(echo "$stale" | wc -l | tr -d ' ') function(s)..." >
 fresh=$(cat "${files[@]}" | ask | gawk -F'\t' 'NF == 2')
 [ -z "$fresh" ] && { echo "no answer; cache untouched" >&2; exit 1; }
 
-printf '%s\n' "$stale" > "$out.stale"
-keep=$(gawk -F'\t' 'FILENAME == ARGV[1] { live[$1]; next }   # keep guesses
-                    FILENAME == ARGV[2] { redo[$1]; next }   # for live, un-
-                    $1 in live && !($1 in redo)' \           # changed names
+printf '%s\n' "$stale" > "$out.stale"   # keep guesses for live, unchanged names:
+keep=$(gawk -F'\t' 'FILENAME == ARGV[1] { live[$1]; next }
+                    FILENAME == ARGV[2] { redo[$1]; next }
+                    $1 in live && !($1 in redo)' \
             "$decl.new" "$out.stale" "$out") || exit 1
 { [ -n "$keep" ] && printf '%s\n' "$keep"
   printf '%s\n' "$fresh"; } > "$out.tmp" &&
