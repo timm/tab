@@ -6,7 +6,11 @@
 # becomes a heading, and a comment trailing a function declaration
 # becomes that function's prose.
 # usage: gawk -f etc/lit.awk tab.lua
-BEGIN { RS = ""; FS = "\n" }
+BEGIN { FS = "\n"                        # ,/guess writes guesses.txt:
+  while ((getline g < (ENVIRON["HOME"] "/tmp/guesses.txt")) > 0) {
+    p = index(g, "\t")                   # name TAB derived signature
+    if (p) guess[substr(g, 1, p-1)] = substr(g, p+1) }
+  RS = "" }                              # paragraph mode, AFTER getline
 
 function flush() {                       # close any open code fence
   if (code != "") { printf "```lua\n%s\n```\n\n", code; code = "" } }
@@ -28,6 +32,8 @@ function add(s) { code = (code == "" ? s : code "\n" s) }
     p = index($i, "--")                                   # blank line
     c = substr($i, p + 2); sub(/^ +/, "", c)
     d = substr($i, 1, p - 1); sub(/[ \t]+$/, "", d)
+    n = d; sub(/^function +/, "", n); sub(/ *\(.*/, "", n)
+    if (n in guess) c = "`" guess[n] "`<br>" c   # sig first, then prose
     say(c); add(d); i++; gap = 0 }
   if (gap && code != "") add("")
   for (; i <= NF; i++) add($i) }

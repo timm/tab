@@ -33,5 +33,7 @@ echo " \${C}  /      //\${R}"
 echo " \${C} /______//\${R}"
 echo " \${C}(______(/\${R}"
 echo ""
+"$Here/,/help"
+echo ""
 EOF
 )

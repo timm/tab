@@ -30,10 +30,10 @@ abs, min, max = math.abs, math.min, math.max
 TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME = {},{},{},{},{},{},{},{}
 
 -- ---- misc ---------------------------------------------------------
-function new(meta,i)                -- i is now one of meta's kind
+function new(meta,i)                -- Connect an instance to its class.
   meta.__index = meta; return setmetatable(i, meta) end
 
-function cli(k,v)                   -- awk-ish operands, left to right:
+function cli(k,v) -- Update config X via cli X=Y. Also, execut --fun items.
   for _, s in order(arg) do        -- name=value, action, file
     k, v = s:match"^(%a%w*)=(.*)$"
     if     k     then the[k] = thing(v)

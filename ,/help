@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# help: this list. usage: ,/help
+cd "$(dirname "$0")" || exit 1
+gawk 'FNR==2 && sub(/^# [^:]*: /,"") { printf "  \033[1;36m%-6s\033[0m %s\n", FILENAME, $0 }' *
