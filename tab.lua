@@ -87,9 +87,8 @@ function csv(file,    rows,s) rows = {} -- first row is the names
   return rows end
 
 -- ---- stats -----------------------------------------------------------
-function Same(xs,ys,    f)          -- two samples, sorted, to compare
-  f = function(t,    u)             -- on copies: the caller's list is
-        u = map(t, same); table.sort(u); return u end -- not ours
+function Same(xs,ys,    f)  -- two samples, sorted, to compare
+  f = function(t,    u)     u=map(t, same); table.sort(u); return u end 
   return new(SAME, {xs = f(xs), ys = f(ys)}) end
 
 function SAME.ok(i)                 -- do all three tests say "same"?
@@ -97,8 +96,7 @@ function SAME.ok(i)                 -- do all three tests say "same"?
 
 function SAME.cohen(i,    a,b,sd)   -- gap of means, in pooled sds
   a, b = nums(i.xs, same), nums(i.ys, same)
-  sd = sqrt(((a.n - 1) * a:div() ^ 2
-             + (b.n - 1) * b:div() ^ 2) / (a.n + b.n - 2))
+  sd = sqrt(((a.n-1) * a:div()^2 + (b.n-1) * b:div()^2) / (a.n+b.n-2))
   return abs(a.mu - b.mu) / (sd + 1e-32) end
 
 function SAME.cliffs(i,    xs,ys,gt,lt,j,k) -- how often xs out-ranks ys

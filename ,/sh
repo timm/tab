@@ -23,15 +23,15 @@ alias gs='git status -sb'
 alias gd='git diff --stat'
 HISTCONTROL=ignoredups:erasedups
 shopt -s histappend checkwinsize
-PS1='\[\e[36m\]\$(basename "\$(dirname "\$PWD")")/\W\[\e[0m\] ᐅ '
+. "$Here/etc/prompt.bash"
 C=\$(tput setaf 6 2>/dev/null); G=\$(tput setaf 2 2>/dev/null)
 D=\$(tput setaf 8 2>/dev/null); R=\$(tput sgr0 2>/dev/null)
 echo ""
-echo " \${C}    _______    \${G}t a b\${R}"
-echo " \${C}   /      /,   \${D}tables, learned from, in lua\${R}"
+echo " \${C}    _______  \${G}t a b\${R}"
+echo " \${C}   /      /,  \${D}tables, learned from, in lua\${R}"
 echo " \${C}  /      //\${R}"
-echo " \${C} /______//     \${D}t\${R} --all  \${D}eg\${R} go=...  \${D}run\${R} nb|rmeans|lgbm"
-echo " \${C}(______(/      \${D}push\${R}     \${D}pdf\${R} f.lua  \${D}vi\${R} f.lua"
+echo " \${C} /______//\${R}"
+echo " \${C}(______(/\${R}"
 echo ""
 EOF
 )
