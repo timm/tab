@@ -1,6 +1,6 @@
 # tab
 
-<p align="center"><img src="docs/logo.png" width="700"></p>
+<p align="center"><img src="docs/logo.png"  ></p>
 
 [lua 101](docs/lua101.md) ·
 [lua, more](docs/luamore.md) ·
