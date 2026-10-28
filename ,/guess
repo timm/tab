@@ -1,25 +1,41 @@
 #!/usr/bin/env bash
 # guess: an LLM guesses each function's true signature, cached. usage: ,/guess [f.lua ...]
+# Incremental: only functions whose declaration line is new or changed
+# are sent to the LLM; the rest keep their cached guess.  rm the
+# cache files in ~/tmp to force a full rebuild.
 cd "$(git rev-parse --show-toplevel)" || exit 1
 [ $# -gt 0 ] && files=("$@") || files=(tab.lua tab-eg.lua)
-out=$HOME/tmp/guesses.txt; mkdir -p "$HOME/tmp"
-if [ -s "$out" ] && [ -z "$(find "${files[@]}" -newer "$out" 2>/dev/null)" ]
-then echo "$out: fresh (to force, rm it)" >&2; exit 0; fi
+out=$HOME/tmp/guesses.txt; decl=$HOME/tmp/guesses.decl
+mkdir -p "$HOME/tmp"; touch "$out" "$decl"
 
-prompt='This is lua. House style: in a function declaration, any
+gawk '/^function[ \t]/ { n = $0                  # name TAB declaration
+        sub(/^function[ \t]+/, "", n); sub(/\(.*/, "", n)
+        printf "%s\t%s\n", n, $0 }' "${files[@]}" > "$decl.new"
+
+stale=$(gawk -F'\t' 'FILENAME == ARGV[1] { old[$1] = $2; next }
+                     FILENAME == ARGV[2] { has[$1];    next }
+                     !($1 in old) || old[$1] != $2 || !($1 in has) { print $1 }' \
+                     "$decl" "$out" "$decl.new")
+
+if [ -z "$stale" ]
+then mv "$decl.new" "$decl"
+     echo "$out: fresh (to force, rm it and $decl)" >&2; exit 0; fi
+
+prompt="This is lua. House style: in a function declaration, any
 parameters after a run of two or more spaces are scratch locals, not
-real parameters. For every top-level function declaration, print one
-line, two tab-separated fields: the full dotted function name, then
-its derived signature with each real parameter annotated with its
-type: the class names used here (TAB, NUM, SYM, BINS, RMEANS, NB,
-BAG, SAME) or num, int, str, bool, list, fun, file. Then -> a short
-guess at the return type (omit if none). Infer types from how each
-value is used; prefer the class names over generic types whenever a
-value is an instance of one. When the body gives a parameter a
-default (idioms like x = x or 4, or a value pulled from the config
-table "the"), show it: name(p:type=default). Plain text, no
-headers, no fences, no other text.
-Example:  SAME.cohen	SAME.cohen(i:SAME, d:num=.35) -> num'
+real parameters. Report ONLY these functions:
+$stale
+For each, print one line, two tab-separated fields: the full dotted
+function name, then its derived signature with each real parameter
+annotated with its type: the class names used here (TAB, NUM, SYM,
+BINS, RMEANS, NB, BAG, SAME) or num, int, str, bool, list, fun,
+file. Then -> a short guess at the return type (omit if none).
+Infer types from how each value is used; prefer the class names over
+generic types whenever a value is an instance of one. When the body
+gives a parameter a default (idioms like x = x or 4, or a value
+pulled from the config table 'the'), show it: name(p:type=default).
+Plain text, no headers, no fences, no other text.
+Example:  SAME.cohen	SAME.cohen(i:SAME, d:num=.35) -> num"
 
 ask() {                        # api direct if a key is in the env;
   if [ -n "$ANTHROPIC_API_KEY" ]   # else the cli, sans mcp startup
@@ -36,6 +52,16 @@ print(json.load(urllib.request.urlopen(r))["content"][0]["text"])'
          --strict-mcp-config --mcp-config='{"mcpServers":{}}' "$prompt"
   fi; }
 
-echo "asking claude; seconds to a minute..." >&2
-cat "${files[@]}" | ask | awk -F'\t' 'NF == 2' > "$out"
+echo "asking claude about $(echo "$stale" | wc -l | tr -d ' ') function(s)..." >&2
+fresh=$(cat "${files[@]}" | ask | gawk -F'\t' 'NF == 2')
+[ -z "$fresh" ] && { echo "no answer; cache untouched" >&2; exit 1; }
+
+printf '%s\n' "$stale" > "$out.stale"
+keep=$(gawk -F'\t' 'FILENAME == ARGV[1] { live[$1]; next }   # keep guesses
+                    FILENAME == ARGV[2] { redo[$1]; next }   # for live, un-
+                    $1 in live && !($1 in redo)' \           # changed names
+            "$decl.new" "$out.stale" "$out") || exit 1
+{ [ -n "$keep" ] && printf '%s\n' "$keep"
+  printf '%s\n' "$fresh"; } > "$out.tmp" &&
+mv "$out.tmp" "$out" && mv "$decl.new" "$decl" && rm -f "$out.stale"
 wc -l "$out"
