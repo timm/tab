@@ -1,8 +1,7 @@
-<p align="center"><img src="docs/logo.png" width="700"></p>
+<p align="center"><img src="docs/logo.png"></p>
 
 [lua 101](docs/lua101.md) ·
 [lua, more](docs/luamore.md) ·
-[learn x in y](lua/learnxiny.md) ·
 [tab.lua](docs/tab.md) ·
 [tab-eg.lua](docs/tab-eg.md) ·
 [license](https://github.com/timm/tab/blob/main/LICENSE.md)

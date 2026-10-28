@@ -1,10 +1,9 @@
 # tab
 
-<p align="center"><img src="docs/logo.png"  ></p>
+<p align="center"><img src="docs/logo.png"></p>
 
 [lua 101](docs/lua101.md) ·
 [lua, more](docs/luamore.md) ·
-[learn x in y](lua/learnxiny.md) ·
 [tab.lua](docs/tab.md) ·
 [tab-eg.lua](docs/tab-eg.md) ·
 [license](https://github.com/timm/tab/blob/main/LICENSE.md)
@@ -19,7 +18,6 @@ grand mean, weighed by variance. Lua, no dependencies, one file.
                   push (save upstream)
     bin/          the installed command (see the rockspec)
     etc/          support code and config (lgbm.py, nn.py, charts.py ...)
-    lua/          learn x in y minutes, in tab.lua
     docs/         the figures, the tutorials, the literate source
 
 ## Install

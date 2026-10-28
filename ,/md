@@ -7,6 +7,8 @@
 # re-aimed at where that page sits, so changing the menu means
 # changing README and running this.
 cd "$(git rev-parse --show-toplevel)" || exit 1
+grep -q '^<<<<<<< ' README.md &&                 # else the markers
+  { echo "README.md has conflict markers"; exit 1; }   # go everywhere
 [ $# -gt 0 ] && files=("$@") || files=(tab.lua tab-eg.lua)
 
 banner() {                      # the banner, aimed at directory $1
@@ -16,20 +18,18 @@ banner() {                      # the banner, aimed at directory $1
                        {exit}' README.md |
   case "$1" in
     .)    cat ;;                               # root: as written
-    docs) sed 's|](docs/|](|g; s|src="docs/|src="|g; s|](lua/|](../lua/|g';;
-    lua)  sed 's|](docs/|](../docs/|g; s|src="docs/|src="../docs/|g
-              s|](lua/|](|g';;
-    *)    sed "s|](|](../|g; s|src=\"|src=\"../|g";;   # one level down
+    docs) sed 's|](docs/|](|g; s|src="docs/|src="|g';;
+    *)    sed 's|](|](../|g; s|src="|src="../|g';;      # one level down
   esac; }
 
 for f in "${files[@]}"; do      # the literate source
   b=$(basename "$f" .lua)
   { printf '# %s\n\n' "$f"; gawk -f etc/lit.awk "$f"; } > "docs/$b.md"; done
 
-for f in README.md LICENSE.md docs/*.md lua/*.md; do     # the banner
+for f in README.md LICENSE.md docs/*.md; do     # the banner
   [ "$f" = README.md ] && continue
   body=$(gawk 'f || /^# / {f = 1; print}' "$f")
   [ -z "$body" ] && { echo "$f: no '# title' line, skipped" >&2; continue; }
   { banner "$(dirname "$f")"; printf '%s\n' "$body"; } > "$f.new" &&
     mv "$f.new" "$f"; done
-ls -l docs/*.md lua/*.md
+ls -l docs/*.md
