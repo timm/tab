@@ -8,7 +8,7 @@
 [tab-eg.lua](docs/tab-eg.md) ·
 [license](https://github.com/timm/tab/blob/main/LICENSE.md)
 
-A good guess from a few dozen labels. Range means, shrunk to the
+Fast inference over tables for classification, regression, optimization. A good guess from a few dozen labels. Range means, shrunk to the
 grand mean, weighed by variance. Lua, no dependencies, one file.
 
     tab.lua       the learner
