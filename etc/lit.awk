@@ -19,23 +19,30 @@ function say(s) { flush(); printf "%s\n\n", s }
 
 function add(s) { code = (code == "" ? s : code "\n" s) }
 
-{ i = 1; txt = ""
+function dot(s) { return s ~ /[.!?:]$/ ? s : s "." }   # one full stop
+
+{ i = 1; txt = ""; head = ""
   if (FNR == 1 && $1 ~ /^#!/) i = 2            # drop the shebang
   while (i <= NF && $i ~ /^\f?--( |$)/) {              # prose on top
-    line = $i; sub(/^\f/, "", line); sub(/^-- ?/, "", line)
+    line = $(i++); sub(/^\f/, "", line); sub(/^-- ?/, "", line)
+    if (line ~ /vim:.*set /) continue            # the editor modeline
     if (line ~ /^-+ +[a-z]/) {                      # ---- bayes ----
-      sub(/^-+ +/, "", line); sub(/ *-+$/, "", line); line = "## " line }
-    txt = (txt == "" ? line : txt "\n" line); i++ }
-  if (txt != "") say(txt)
-  gap = (txt == "")                  # no prose: we are mid-fence, so
+      sub(/^-+ +/, "", line); sub(/ *-+$/, "", line)
+      head = "## " line; continue }       # a heading stands on its own
+    txt = (txt == "" ? line : txt "\n" line) }
+  if (head != "") say(head)
+  gap = (txt == "" && head == "")    # no prose: we are mid-fence, so
   if (i <= NF && $i ~ /^function/ && index($i, "--")) {   # keep the
     p = index($i, "--")                                   # blank line
     c = substr($i, p + 2); sub(/^ +/, "", c)
-    sub(/^> *[^;]*; */, "", c)         # "--> type;" shows as the sig
+    sub(/^> *[A-Za-z_]+;? */, "", c)   # "--> type" shows as the sig
     d = substr($i, 1, p - 1); sub(/[ \t]+$/, "", d)
     n = d; sub(/^function +/, "", n); sub(/ *\(.*/, "", n)
-    if (n in sig) c = "`" sig[n] "` " c        # sig first, then prose
-    say(c); add(d); i++; gap = 0 }
+    if (n in sig) c = "`" sig[n] "`" (c == "" ? "" : " " c)
+    c = c (c == "" || txt == "" ? txt : " " txt)
+    if (c != "") say(dot(c))
+    txt = ""; add(d); i++; gap = 0 }           # sig first, then prose
+  if (txt != "") say(txt)
   if (gap && code != "") add("")
   for (; i <= NF; i++) add($i) }
 

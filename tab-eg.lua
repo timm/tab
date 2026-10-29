@@ -60,14 +60,16 @@ function bayes(tr,te,    nb,col,bag,trb) -- learn tr, guess all of te
     bag:tally(row[col.at], nb:guess(row)) end
   return ("%.1f,%.1f,%.1f,%.3f"):format(bag:score()) end
 
-function goal(tbl,    col)          -- regression: that one column, in
-  col = (the.file or ""):find"/regression/"   -- its own units, which is
+-- Return a `fn` that scores one `row`.  For `moot/regression`, that is
+-- the one y column, in its own units.  Elsewhere it is `ydist`, where 0
+-- is heaven whatever `col.w` says, so `mae` compares across sets.
+function goal(tbl,    col) --> fn
+  col = (the.file or ""):find"/regression/"
         and #tbl.y == 1 and getmetatable(tbl.y[1]) == NUM and tbl.y[1]
   if col then
     return function(row) return tonumber(row[col.at]) or col.mu end end
-  return function(row) return tbl:ydist(row) end end -- else ydist: 0 is
-                                    -- best whatever col.w says, and mae
-                                    -- then compares across sets
+  return function(row) return tbl:ydist(row) end end
+
 function rmeans(tr,te,    y,lim)    -- the frugal arm: budget labels
   y   = goal(tr)
   lim = the.budget - the.check

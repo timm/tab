@@ -29,7 +29,10 @@ gawk -f etc/sig.awk "${files[@]}" > "$SIGS"      # derived, for lit.awk
 
 for f in "${files[@]}"; do      # the literate source
   b=$(basename "$f" .lua)
-  { printf '# %s\n\n' "$f"; gawk -f etc/lit.awk "$f"; } > "docs/$b.md"; done
+  { printf '# %s\n\n' "$f"                   # title, then the naming
+    gawk -v table=1 -f etc/sig.awk /dev/null  # conventions the
+    printf '\n'                               # signatures below assume
+    gawk -f etc/lit.awk "$f"; } > "docs/$b.md"; done
 
 for f in README.md LICENSE.md docs/*.md; do     # the banner
   [ "$f" = README.md ] && continue

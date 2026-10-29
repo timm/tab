@@ -4,11 +4,12 @@
 # its receiver, and the value names v x a b take their kind from that
 # receiver.  A name the lexicon does not know is left bare.
 # usage: gawk -f etc/sig.awk tab.lua
-BEGIN { lex("t rows lst names xs ys", "list"); lex("row", "row")
-        lex("f y",             "fun");  lex("s txt k how want got", "str")
-        lex("n at",            "int");  lex("file src",     "file")
-        lex("col all",         "NUM");  lex("tbl meta sub", "TAB")
-        lex("v x a b",         "atom") }
+BEGIN { lex("t rows xs ys", "list");  lex("row",  "row")
+        lex("fn",         "fun");   lex("s txt how", "str")
+        lex("n at",       "int");   lex("file",  "file")
+        lex("col",        "NUM");   lex("tbl",   "TAB")
+        lex("v x a b",    "atom")
+        if (table) { show(); exit } }
 
 /^function[ \t]/ { d = ""; ret = ""      # a declaration may wrap onto a
   do { d = d (d ? "\f" : "") bare($0)    # second line, so keep reading
@@ -16,7 +17,26 @@ BEGIN { lex("t rows lst names xs ys", "list"); lex("row", "row")
   print name(d) "\t" sig(d) }
 
 function lex(names, t,   a, k) {         # every name in names is a t
-  split(names, a, " "); for (k in a) ty[a[k]] = t }
+  split(names, a, " "); for (k = 1; k in a; k++) ty[a[k]] = t
+  kinds[++nk] = t; of[t] = names }                # kept in order, to show
+
+function show(   j, k, a, s) {           # the lexicon, as one md table,
+  print "<details><summary><b>types</b>: a parameter's type comes" \
+        " from its name</summary>"      # folded, so it costs one line
+  print ""                              # of the page it heads
+  print "| type | names |"; print "|------|-------|"
+  for (j = 1; j <= nk; j++) {
+    split(of[kinds[j]], a, " "); s = ""
+    for (k = 1; k in a; k++) s = s (s ? ", " : "") "`" a[k] "`"
+    printf "| %s | %s |\n", kinds[j], s }
+  print ""
+  print "A suffix `s` means a list of those, so `rows` is a list of"
+  print "`row`.  A method's first parameter, `i`, is its receiver.  The"
+  print "value names `v x a b` take their kind from that receiver, so"
+  print "`NUM.add(i,v)` reads `v:num`.  A name not listed is left bare."
+  print "A parameter after two or more spaces is a scratch local, not"
+  print "an argument, and does not appear in these signatures."
+  print ""; print "</details>" }
 
 function bare(s) {                       # the code, less its comment;
   if (match(s, /-->[ \t]*[^;]*/)) {      # "--> type" sets the return

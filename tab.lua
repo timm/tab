@@ -14,6 +14,7 @@ flags:
   bins=7           numeric columns get this many bins
   budget=50        labels, all in
   check=5          of those, saved for the test rows
+  decs=2           decimals, when a number is printed
   m=2              m-estimate: prior weight for a thin bin
   p=2              minkowski coefficient
   seed=1234567891  random number seed
@@ -30,10 +31,12 @@ abs, min, max = math.abs, math.min, math.max
 TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME = {},{},{},{},{},{},{},{}
 
 -- ---- misc ---------------------------------------------------------
-function new(meta,i) --> inst; connects an instance to its class.
+-- Connect the instance `i` to its class `meta`.
+function new(meta,i) --> inst
   meta.__index = meta; return setmetatable(i, meta) end
 
-function cli(k,v) --> dict; update config via cli X=Y. Call --fun items.
+-- Update `the` from the command line: a flag, an action, or a file.
+function cli(k,v) --> dict
   for _, s in order(arg) do        -- name=value, action, file
     k, v = s:match"^(%a%w*)=(.*)$"
     if     k     then the[k] = thing(v)
@@ -41,46 +44,72 @@ function cli(k,v) --> dict; update config via cli X=Y. Call --fun items.
     else              the.file = s end end
   return the end
 
-function rint(n) --> int; 1..n, repeatable from the.seed
+-- Return an int in 1..`n`, repeatable from `the.seed`.
+function rint(n) --> int
   the.seed = (16807 * the.seed) % 2147483647
   return 1 + floor(n * the.seed / 2147483647) end
 
-function shuffle(t,    j) --> list; re-orders in place, Fisher-Yates
+-- Return `t`, Fisher-Yates shuffled in place.
+function shuffle(t,    j) --> list
   for k = #t, 2, -1 do j = rint(k); t[k], t[j] = t[j], t[k] end
   return t end
 
-function map(t,f,    u) --> list; f(v,k) over t,in order; nils dropped
-  u={}; for k, v in ipairs(t) do u[#u+1] = f(v, k) end 
+-- Return `fn(v,k)` over `t`, in order, with nils dropped.
+function map(t,fn,    u) --> list
+  u={}; for k, v in ipairs(t) do u[#u+1] = fn(v, k) end 
   return u end                                        
 
-function sum(t,f,    n) --> num; f(v,k) over t's items, added up
-  n=0; for k, v in pairs(t) do n = n + f(v, k) end; return n end
+-- Return `fn(v,k)` over every item of `t`, added up.
+function sum(t,fn,    n) --> num
+  n=0; for k, v in pairs(t) do n = n + fn(v, k) end; return n end
 
-function best(t,f,    n,m,u) --> any;  the k, and biggest f(v,k), in t
+-- Return the key of `t` with the biggest `fn(v,k)`, and that score.
+function best(t,fn,    n,m,u) --> any
   for k, v in pairs(t) do
-    m = f(v, k)
+    m = fn(v, k)
     if not n or m > n then n, u = m, k end end
   return u, n end
 
-function same(x) return x end --> any; identity
+-- Return `x`.
+function same(x) return x end --> any
 
-function lt(a,b) return a < b end --> bool; for  ascending sorts.
+-- Return true when `a` sorts before `b`.
+function lt(a,b) return a < b end --> bool
 
-function order(t,f,    u,at)  --> fun; ipairs; or, given f, a sorted
-  if not f then return ipairs(t) end -- copy's ipairs. f: a comparator,
-  if type(f) ~= "function" then     -- or a cell index to sort rows on
-    at = f; f = function(a,b) return a[at] < b[at] end end
-  u = map(t, same); table.sort(u, f); return ipairs(u) end
+-- Return `ipairs(t)`, or, given `fn`, that of a sorted copy.  `fn`
+-- is a comparator, or a cell index to sort rows on.
+function order(t,fn,    u,at) --> fun
+  if not fn then return ipairs(t) end -- copy's ipairs. fn: a comparator,
+  if type(fn) ~= "function" then     -- or a cell index to sort rows on
+    at = fn; fn = function(a,b) return a[at] < b[at] end end
+  u = map(t, same); table.sort(u, fn); return ipairs(u) end
 
-function thing(s) --> atom; one cell: a number, else the string
+-- Return `x:atom` as text, with nums cut to `the.decs` decimals.
+-- Whole numbers stay whole, so a count of 318 is not "318.00".
+function str(x) --> str
+  return type(x) == "number" and x ~= floor(x)
+         and ("%." .. the.decs .. "f"):format(x) or tostring(x) end
+
+-- Print the lot, tab separated, every number through `str`.  This
+-- shadows lua's own print for everything sharing this `_ENV`, so
+-- `decs=4` widens every number anything here ever prints.
+function print(...) --> nil
+  local out = {}
+  for j = 1, select("#", ...) do out[j] = str((select(j, ...))) end
+  io.write(table.concat(out, "\t"), "\n") end
+
+-- Return the `str | num` in  `s:str`.
+function thing(s) --> atom
   s = s:match"^%s*(.-)%s*$"; return tonumber(s) or s end
 
-function cells(s,    row) --> row; one csv line, split into cells
-  row = {}
+-- Return the `row`  in a  comma seperated `s:str`.
+function cells(s) --> row
+  local row = {}
   for v in (s .. ","):gmatch"(.-)," do row[#row + 1] = thing(v) end
   return row end
 
-function csv(file,    rows,s) --> list; rows of a file, names first
+-- Return the `rows` in a  `file:str`.
+function csv(file,    rows,s) --> rows
   rows = {}
   for line in io.lines((file:gsub("^~", os.getenv"HOME" or "~"))) do
     s = line:match"^%s*(.-)%s*$"
@@ -89,20 +118,23 @@ function csv(file,    rows,s) --> list; rows of a file, names first
   return rows end
 
 -- ---- stats -----------------------------------------------------------
-function Same(xs,ys,    f) --> SAME; two samples, sorted, to compare
-  f = function(t,    u)     u=map(t, same); table.sort(u); return u end 
-  return new(SAME, {xs = f(xs), ys = f(ys)}) end
+-- Return two samples, `xs` and `ys`, sorted, ready to compare.
+function Same(xs,ys,    fn) --> SAME
+  fn = function(t,    u)     u=map(t, same); table.sort(u); return u end 
+  return new(SAME, {xs = fn(xs), ys = fn(ys)}) end
 
-function SAME.ok(i) --> bool; do all three tests say "same"?
+-- Return true when all three tests call `i.xs` and `i.ys` the same.
+function SAME.ok(i) --> bool
   return i:cohen() <= .35 and i:cliffs() <= .195 and i:ks() <= 1.36 end
 
-function SAME.cohen(i,    a,b,sd) --> num; gap of means, in pooled sds
+-- Return the gap between the two means, in pooled sds.
+function SAME.cohen(i,    a,b,sd) --> num
   a, b = nums(i.xs, same), nums(i.ys, same)
   sd = sqrt(((a.n-1) * a:div()^2 + (b.n-1) * b:div()^2) / (a.n+b.n-2))
   return abs(a.mu - b.mu) / (sd + 1e-32) end
 
-function SAME.cliffs(i, --> num; how often xs out-ranks ys, 0..1
-                     xs,ys,gt,lt,j,k)
+-- Return how often `i.xs` out-ranks `i.ys`, 0..1.
+function SAME.cliffs(i,    xs,ys,gt,lt,j,k) --> num
   xs, ys, gt, lt, j, k = i.xs, i.ys, 0, 0, 0, 0
   for _, x in order(xs) do
     while j < #ys and ys[j+1] <  x do j = j + 1; k = j end
@@ -110,8 +142,8 @@ function SAME.cliffs(i, --> num; how often xs out-ranks ys, 0..1
     gt, lt = gt + j, lt + #ys - k end
   return abs(gt - lt) / (#xs * #ys) end
 
-function SAME.ks(i, --> num; widest gap of two cdfs, in critical units
-                 xs,ys,p,q,d,v)
+-- Return the widest gap of the two cdfs, in critical units.
+function SAME.ks(i,    xs,ys,p,q,d,v) --> num
   xs, ys, p, q, d = i.xs, i.ys, 0, 0, 0
   while p < #xs and q < #ys do
     v = min(xs[p+1], ys[q+1])
@@ -120,70 +152,84 @@ function SAME.ks(i, --> num; widest gap of two cdfs, in critical units
     d = max(d, abs(p/#xs - q/#ys)) end
   return d / sqrt((#xs + #ys) / (#xs * #ys)) end
 
--- ---- columns ---------------------------------------------------------
+-- ---- columns ---------------------------------------------------------
 -- NUM and SYM share one protocol: add, div, norm, bin.  Each verb's
 -- two faces sit together below.  nVals is SYM's alone.
 
-function Num(txt,at) --> NUM; ! + -: goals.  X: skip.  A-Z: num
+-- Return a NUM for `txt:str` at `at:num`: A-Z num, !+- goal, X skip.
+function Num(txt,at) --> NUM
   txt, at = txt or "N", at or 0    -- no args: an anonymous num
   return new(NUM, {txt = txt, at = at, n = 0, mu = 0, m2 = 0,
                    w = txt:find"%-$" and 0 or 1}) end
 
-function Sym(txt,at) --> SYM; a-z names; counts, not Welford
+-- Return a SYM for `txt:str` at `at:num`: a-z names, just counted.
+function Sym(txt,at) --> SYM
   txt, at = txt or "S", at or 0
   return new(SYM, {txt = txt, at = at, n = 0, has = {},
                    w = txt:find"%-$" and 0 or 1}) end
 
-function nums(lst,f,    i) --> NUM; lst, summarized in one num
-  i=Num(); for _,x in order(lst) do i:add(f(x)) end; return i end
+-- Return one NUM summarizing `fn(x)` over `lst:list`.
+function nums(lst,fn,    i) --> NUM
+  i=Num(); for _,x in order(lst) do i:add(fn(x)) end; return i end
 
-function NUM.add(i,v,    d) --> nil; Welford's running mean and sd
+-- Add `v:atom` to `i`, keeping Welford's running mean and sd.
+function NUM.add(i,v,    d) --> nil
   if v == "?" then return end
   i.n = i.n + 1
   d = v - i.mu
   i.mu = i.mu + d / i.n
   i.m2 = i.m2 + d * (v - i.mu) end
 
-function SYM.add(i,v) --> nil; one more of v
+-- Add one more `v:atom` to `i`'s counts.
+function SYM.add(i,v) --> nil
   if v == "?" then return end
   i.n = i.n + 1
   i.has[v] = (i.has[v] or 0) + 1 end
 
-function NUM.div(i) --> num; standard deviation
+-- Return `i`'s standard deviation.
+function NUM.div(i) --> num
   return i.n < 2 and 0 or sqrt(i.m2 / (i.n - 1)) end
 
-function SYM.div(i,    f) --> num; entropy
-  f = function(n) return -n/i.n * log(n/i.n) end
-  return sum(i.has, f) / log(2) end
+-- Return `i`'s entropy.
+function SYM.div(i,    fn) --> num
+  fn = function(n) return -n/i.n * log(n/i.n) end
+  return sum(i.has, fn) / log(2) end
 
-function NUM.norm(i,v,    z) --> atom; logistic cdf, clipped at 3 sds
+-- Return `v:atom` on a logistic cdf, clipped at 3 sds, so 0..1.
+function NUM.norm(i,v,    z) --> atom
   if v == "?" then return v end
   z = (v - i.mu) / (i:div() + 1e-32)
   z = z > 3 and 3 or (z < -3 and -3 or z)
   return 1 / (1 + exp(-1.7 * z)) end
 
-function SYM.norm(i,v) return v end --> atom; syms pass through
+-- Return `v:atom` unchanged: syms do not normalize.
+function SYM.norm(i,v) return v end --> atom
 
-function NUM.bin(i,v,    b) --> atom; v's bin, 1..the.bins
+-- Return `v:atom`'s bin, 1..`the.bins`.
+function NUM.bin(i,v,    b) --> atom
   if v == "?" then return v end
   b = 1 + floor(the.bins * i:norm(v))
   return b > the.bins and the.bins or b end
 
-function SYM.bin(i,v) return v end --> atom; a sym is its own bin
+-- Return `v:atom`: a sym is its own bin.
+function SYM.bin(i,v) return v end --> atom
 
-function SYM.nVals(i,    f) --> int; how many values i has seen
-  f = function() return 1 end       -- one value still splits two ways
-  i.kinds = i.kinds or max(2, sum(i.has, f))
+-- Return how many values `i` has seen, at least 2.
+function SYM.nVals(i,    fn) --> int
+  fn = function() return 1 end       -- one value still splits two ways
+  i.kinds = i.kinds or max(2, sum(i.has, fn))
   return i.kinds end
 
 -- ---- tables ----------------------------------------------------------
-function Tab(src,    i) --> TAB; a file name, or names then rows
+-- Return a TAB from `src`: a file name, or names then rows.
+function Tab(src,    i) --> TAB
   i = new(TAB, {rows = {}})
   for _, row in order(type(src) == "string" and csv(src) or src) do
     i:addRow(row) end
   return i end
 
-function TAB.head(i,names,    col) --> nil; first row, read as names
+-- Read `names:row` as `i`'s column header.
+function TAB.head(i,names,    col) --> nil
   i.names, i.cols, i.x, i.y = names, {}, {}, {}
   for at, txt in order(names) do
     col = (txt:find"^%u" and Num or Sym)(txt, at)
@@ -193,37 +239,39 @@ function TAB.head(i,names,    col) --> nil; first row, read as names
       if txt:find"!$" then i.klass = col end  -- last ! is the klass
     else i.x[#i.x + 1] = col end end end
 
-function TAB.addRow(i,row) --> row; add a row; the first is the names
+-- Add `row` to `i`.  The first row read becomes the names.
+function TAB.addRow(i,row) --> row
   if not i.cols then return i:head(row) end
   i.rows[#i.rows + 1] = row
   for _, col in order(i.cols) do col:add(row[col.at]) end
   return row end
 
-function TAB.clone(i,rows,how, --> TAB; same columns, fresh summaries
-                   out)
+-- Return `rows` in a fresh TAB; `how:str`="bin" discretizes the nums.
+function TAB.clone(i,rows,how,    out) --> TAB
   out = {how and map(i.cols, function(col) return col.txt:lower() end)
-             or i.names}         -- how makes nums discrete, so sym
+             or i.names}
   for _, row in order(rows or {}) do
     out[#out + 1] = not how and row or map(i.cols,
       function(col) return col[how](col, row[col.at]) end) end
   return Tab(out) end
 
-function TAB.ydist(i,row,    f) --> num; goals to heaven; 0 is best
-  f = function(col)
+-- Return `row`'s distance to heaven over `i.y`, where 0 is best.
+function TAB.ydist(i,row,    fn) --> num
+  fn = function(col)
           return abs(col:norm(row[col.at]) - col.w) ^ the.p end
-  return (sum(i.y, f) / #i.y) ^ (1 / the.p) end
+  return (sum(i.y, fn) / #i.y) ^ (1 / the.p) end
 
-function TAB.split(i, --> list; two lists, 80:20, of a shuffled copy
-                   rows,n,t,u1,u2)
+-- Return two lists, 80:20, of a shuffled copy of `i.rows`.
+function TAB.split(i,    rows,n,t,u1,u2) --> list
   rows   = shuffle(map(i.rows, same))    -- never i.rows itself
   n      = floor(.8 * #rows)
   u1, u2 = {}, {}; t = u1
   for j,row in order(rows) do if j>n then t = u2 end; t[#t+1] = row end
   return u1, u2 end
 
--- ---- rmeans ----------------------------------------------------------
-function Bins(col,rows,y,all, --> BINS; col's bins, and their worth
-              i,b)
+-- ---- rmeans ----------------------------------------------------------
+-- Return `col`'s bins over `rows`, scored on `y`, and their worth.
+function Bins(col,rows,y,all,    i,b) --> BINS
   i = new(BINS, {has = {}, w = 0})
   for _, row in order(rows) do
     b = col:bin(row[col.at])
@@ -232,14 +280,14 @@ function Bins(col,rows,y,all, --> BINS; col's bins, and their worth
   i.w = i:weight(all)
   return i end
 
-function BINS.weight(i,all, --> num; variance i's bins cut off
-                     f,s)
-  f = function(v) return v.n/all.n * v:div() ^ 2 end
-  s = all:div() ^ 2 - sum(i.has, f)
+-- Return how much of `all:NUM`'s variance `i`'s bins cut off.
+function BINS.weight(i,all,    fn,s) --> num
+  fn = function(v) return v.n/all.n * v:div() ^ 2 end
+  s = all:div() ^ 2 - sum(i.has, fn)
   return s > 0 and s or 0 end
 
-function Rmeans(tbl,rows,y, --> RMEANS; one bins per x column
-                sub,all,i)
+-- Return one BINS per x column of `tbl:TAB`, over `rows`, on `y`.
+function Rmeans(tbl,rows,y,    sub,all,i) --> RMEANS
   sub = tbl:clone(rows)
   all = nums(sub.rows, y)
   i   = new(RMEANS, {all = all, has = {}, cols = sub.x})
@@ -247,9 +295,9 @@ function Rmeans(tbl,rows,y, --> RMEANS; one bins per x column
     i.has[col.at] = Bins(col, sub.rows, y, all) end
   return i end
 
-function RMEANS.guess(i,row, --> num; bin means, m-estimated,
-                      s,w,bins,v,mu)
-  s, w, mu = 0, 0, i.all.mu               -- weighed by variance won
+-- Return `row`'s guess: bin means, m-estimated, weighed by variance.
+function RMEANS.guess(i,row,    s,w,bins,v,mu) --> num
+  s, w, mu = 0, 0, i.all.mu
   for _, col in order(i.cols) do
     bins = i.has[col.at]
     v    = bins and bins.has[col:bin(row[col.at])]
@@ -259,26 +307,27 @@ function RMEANS.guess(i,row, --> num; bin means, m-estimated,
   if w > 0 then return s / w end
   return i.all.mu end
 
-function RMEANS.prune(i,how, --> RMEANS; after training, keep only
-                      f,_,most)
-  f = function(col) return i.has[col.at].w end -- cols worth their
-  _, most = best(i.cols, f)           -- weight: "max", >= 10% of the
-  i.cols = map(i.cols, function(col)  -- best; "chance", more than
-    return (how == "max" and f(col) >= .1 * most  -- noise would cut
-            or how == "chance" and f(col) > i:chance(i.has[col.at]))
+-- Return `i` with only the columns worth their weight: "max" or
+-- "chance".
+function RMEANS.prune(i,how,    fn,_,most) --> RMEANS
+  fn = function(col) return i.has[col.at].w end
+  _, most = best(i.cols, fn)
+  i.cols = map(i.cols, function(col)
+    return (how == "max" and fn(col) >= .1 * most
+            or how == "chance" and fn(col) > i:chance(i.has[col.at]))
            and col or nil end)
   return i end
 
-function RMEANS.chance(i,b, --> num; variance k random bins would cut
-                       f,k)
-  f = function() return 1 end       -- from all: (k-1)/(n-1) of it
-  k = sum(b.has, f)
+-- Return the variance `b`'s random bins would cut from `i.all`.
+function RMEANS.chance(i,b,    fn,k) --> num
+  fn = function() return 1 end
+  k   = sum(b.has, fn)
   return (k - 1) / max(1, i.all.n - 1) * i.all:div() ^ 2 end
 
 -- ---- bayes -----------------------------------------------------------
-function Nb(tbl,rows, --> NB; a sub-table per klass, and a klass count
-            i,col,v)
-  col = tbl.klass                   -- the klass column
+-- Return one sub-TAB per klass in `rows`, and how many klasses.
+function Nb(tbl,rows,    i,col,v) --> NB
+  col = tbl.klass
   i   = new(NB, {tbl = tbl, subs = {}, n = #rows, nKlass = 0})
   for _, row in order(rows) do
     v = row[col.at]
@@ -287,55 +336,60 @@ function Nb(tbl,rows, --> NB; a sub-table per klass, and a klass count
     i.subs[v]:addRow(row) end
   return i end
 
-function NB.like(i,sub,row,    f) --> num; log P(row|sub), m-estimated
-  f = function(col1,at,    col,v)
+-- Return log P(`row` | `sub:TAB`), m-estimated.
+function NB.like(i,sub,row,    fn) --> num
+  fn = function(col1,at,    col,v)
         col, v = i.tbl.x[at], row[col1.at] -- col knows every value;
         if v == "?" then return 0 end      -- col1 knows this klass's
         return log(((col1.has[v] or 0) + the.m)    -- and m per value
                    / (col1.n + the.m * col:nVals())) end
   return log((#sub.rows + the.m) / (i.n + the.m * i.nKlass)) -- m/klass
-         + sum(sub.x, f) end
+         + sum(sub.x, fn) end
 
-function NB.guess(i,row,    f) --> atom; row's likeliest klass
-  f = function(sub) return i:like(sub, row) end
-  return (best(i.subs, f)) end
+-- Return `row`'s likeliest klass.
+function NB.guess(i,row,    fn) --> atom
+  fn = function(sub) return i:like(sub, row) end
+  return (best(i.subs, fn)) end
 
 -- ---- scoring ---------------------------------------------------------
-function Bag() --> BAG; blank counts, for one test set
+-- Return blank counts, for one test set.
+function Bag() --> BAG
   return new(BAG, {n = 0, ok = 0, got = {}, want = {}, hit = {}}) end
 
-function BAG.tally(i,want,got) --> nil; one guess, into the bag
+-- Add one guess to `i`: `want:atom` was right, `got:atom` was said.
+function BAG.tally(i,want,got) --> nil
   i.n          = i.n + 1
   i.ok         = i.ok + (want == got and 1 or 0)
   i.want[want] = (i.want[want] or 0) + 1
   i.got[got]   = (i.got[got] or 0) + 1
   if want == got then i.hit[got] = (i.hit[got] or 0) + 1 end end
 
-function BAG.parts(i,x, --> int; x's tp, fp, fn and tn, counted so far
-                   tp,fp,fn)
+-- Return klass `x:atom`'s tp, fp, fn and tn, counted so far.
+function BAG.parts(i,x,    tp,fp,fn) --> int
   tp = i.hit[x] or 0
   fp = (i.got[x] or 0) - tp
   fn = (i.want[x] or 0) - tp
   return tp, fp, fn, i.n - fn - fp - tp end
 
-function BAG.score1(i,x, --> num; x's pd, pf, and d2h
-                    tp,fp,fn,tn,r1,f1)
+-- Return klass `x:atom`'s pd, pf and d2h.
+function BAG.score1(i,x,    tp,fp,fn,tn,r1,f1) --> num
   tp, fp, fn, tn = i:parts(x)
   r1 = tp / (tp + fn)
   f1 = fp + tn > 0 and fp / (fp + tn) or 0
   return r1, f1, sqrt((1 - r1) ^ 2 + f1 ^ 2) / sqrt(2) end
 
-function BAG.score(i, --> num; macro scores: one vote per klass
-                   k,pd,pf,d2h,r1,f1,d1)
+-- Return `i`'s macro acc, pd, pf, d2h and klass count.
+function BAG.score(i,    k,pd,pf,d2h,r1,f1,d1) --> num
   k, pd, pf, d2h = 0, 0, 0, 0
   for x in pairs(i.want) do
     r1, f1, d1 = i:score1(x)
     k, pd, pf, d2h = k + 1, pd + r1, pf + f1, d2h + d1 end
   return 100*i.ok/i.n, 100*pd/k, 100*pf/k, d2h/k, k end
 
--- ---- tests ------------------------------------------------------
+-- ---- tests ------------------------------------------------------
 eg  = {}                           -- cli runs eg[action]; see --all
-function near(a,b) return abs(a - b) < 1e-6 end --> bool; close enough
+-- Return true when `a:num` and `b:num` are close enough.
+function near(a,b) return abs(a - b) < 1e-6 end --> bool
 
 eg["-h"] = function() print(help) end
 
@@ -568,7 +622,7 @@ eg["--same"] = function(    xs,ys,zs,i)
   assert(near(i:ks(),     0.1581138830))
   assert(near(Same(xs, xs):cohen(), 0)) end
 
--- ---- start ------------------------------------------------------
+-- ---- start ------------------------------------------------------
 for k, v in help:gmatch"\n%s+(%a+)=(%S+)" do the[k] = thing(v) end
 
 if (arg and arg[0] or ""):find"tab%.lua$" then
