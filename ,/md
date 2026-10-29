@@ -24,6 +24,9 @@ banner() {                      # the banner, aimed at directory $1
     *)    sed 's|](|](../|g; s|src="|src="../|g';;      # one level down
   esac; }
 
+SIGS=$(mktemp); export SIGS; trap 'rm -f "$SIGS"' EXIT  # signatures,
+gawk -f etc/sig.awk "${files[@]}" > "$SIGS"      # derived, for lit.awk
+
 for f in "${files[@]}"; do      # the literate source
   b=$(basename "$f" .lua)
   { printf '# %s\n\n' "$f"; gawk -f etc/lit.awk "$f"; } > "docs/$b.md"; done
