@@ -9,7 +9,7 @@
 BEGIN { FS = "\n"                        # $SIGS: etc/sig.awk's output,
   while ((getline g < ENVIRON["SIGS"]) > 0) {   # "name TAB signature"
     p = index(g, "\t")                   # name TAB derived signature
-    if (p) guess[substr(g, 1, p-1)] = substr(g, p+1) }
+    if (p) sig[substr(g, 1, p-1)] = substr(g, p+1) }
   RS = "" }                              # paragraph mode, AFTER getline
 
 function flush() {                       # close any open code fence
@@ -34,7 +34,7 @@ function add(s) { code = (code == "" ? s : code "\n" s) }
     sub(/^> *[^;]*; */, "", c)         # "--> type;" shows as the sig
     d = substr($i, 1, p - 1); sub(/[ \t]+$/, "", d)
     n = d; sub(/^function +/, "", n); sub(/ *\(.*/, "", n)
-    if (n in guess) c = "`" guess[n] "`<br>" c   # sig first, then prose
+    if (n in sig) c = "`" sig[n] "` " c        # sig first, then prose
     say(c); add(d); i++; gap = 0 }
   if (gap && code != "") add("")
   for (; i <= NF; i++) add($i) }

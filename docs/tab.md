@@ -47,14 +47,14 @@ TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME = {},{},{},{},{},{},{},{}
 
 ## misc
 
-`new(meta:TAB, i) -> inst`<br>connects an instance to its class.
+`new(meta:TAB, i) -> inst` connects an instance to its class.
 
 ```lua
 function new(meta,i)
   meta.__index = meta; return setmetatable(i, meta) end
 ```
 
-`cli(k:str, v:atom) -> dict`<br>update config via cli X=Y. Call --fun items.
+`cli(k:str, v:atom) -> dict` update config via cli X=Y. Call --fun items.
 
 ```lua
 function cli(k,v)
@@ -66,7 +66,7 @@ function cli(k,v)
   return the end
 ```
 
-`rint(n:int) -> int`<br>1..n, repeatable from the.seed
+`rint(n:int) -> int` 1..n, repeatable from the.seed
 
 ```lua
 function rint(n)
@@ -74,7 +74,7 @@ function rint(n)
   return 1 + floor(n * the.seed / 2147483647) end
 ```
 
-`shuffle(t:list) -> list`<br>re-orders in place, Fisher-Yates
+`shuffle(t:list) -> list` re-orders in place, Fisher-Yates
 
 ```lua
 function shuffle(t,    j)
@@ -82,7 +82,7 @@ function shuffle(t,    j)
   return t end
 ```
 
-`map(t:list, f:fun) -> list`<br>f(v,k) over t,in order; nils dropped
+`map(t:list, f:fun) -> list` f(v,k) over t,in order; nils dropped
 
 ```lua
 function map(t,f,    u)
@@ -90,14 +90,14 @@ function map(t,f,    u)
   return u end                                        
 ```
 
-`sum(t:list, f:fun) -> num`<br>f(v,k) over t's items, added up
+`sum(t:list, f:fun) -> num` f(v,k) over t's items, added up
 
 ```lua
 function sum(t,f,    n)
   n=0; for k, v in pairs(t) do n = n + f(v, k) end; return n end
 ```
 
-`best(t:list, f:fun) -> any`<br>the k, and biggest f(v,k), in t
+`best(t:list, f:fun) -> any` the k, and biggest f(v,k), in t
 
 ```lua
 function best(t,f,    n,m,u)
@@ -107,19 +107,19 @@ function best(t,f,    n,m,u)
   return u, n end
 ```
 
-`same(x:atom) -> any`<br>identity
+`same(x:atom) -> any` identity
 
 ```lua
 function same(x) return x end
 ```
 
-`lt(a:atom, b:atom) -> bool`<br>for  ascending sorts.
+`lt(a:atom, b:atom) -> bool` for  ascending sorts.
 
 ```lua
 function lt(a,b) return a < b end
 ```
 
-`order(t:list, f:fun) -> fun`<br>ipairs; or, given f, a sorted
+`order(t:list, f:fun) -> fun` ipairs; or, given f, a sorted
 
 ```lua
 function order(t,f,    u,at)
@@ -129,14 +129,14 @@ function order(t,f,    u,at)
   u = map(t, same); table.sort(u, f); return ipairs(u) end
 ```
 
-`thing(s:str) -> atom`<br>one cell: a number, else the string
+`thing(s:str) -> atom` one cell: a number, else the string
 
 ```lua
 function thing(s)
   s = s:match"^%s*(.-)%s*$"; return tonumber(s) or s end
 ```
 
-`cells(s:str) -> row`<br>one csv line, split into cells
+`cells(s:str) -> row` one csv line, split into cells
 
 ```lua
 function cells(s,    row)
@@ -145,7 +145,7 @@ function cells(s,    row)
   return row end
 ```
 
-`csv(file:file) -> list`<br>rows of a file, names first
+`csv(file:file) -> list` rows of a file, names first
 
 ```lua
 function csv(file,    rows,s)
@@ -159,7 +159,7 @@ function csv(file,    rows,s)
 
 ## stats
 
-`Same(xs:list, ys:list) -> SAME`<br>two samples, sorted, to compare
+`Same(xs:list, ys:list) -> SAME` two samples, sorted, to compare
 
 ```lua
 function Same(xs,ys,    f)
@@ -167,14 +167,14 @@ function Same(xs,ys,    f)
   return new(SAME, {xs = f(xs), ys = f(ys)}) end
 ```
 
-`.ok(i:SAME) -> bool`<br>do all three tests say "same"?
+`.ok(i:SAME) -> bool` do all three tests say "same"?
 
 ```lua
 function SAME.ok(i)
   return i:cohen() <= .35 and i:cliffs() <= .195 and i:ks() <= 1.36 end
 ```
 
-`.cohen(i:SAME) -> num`<br>gap of means, in pooled sds
+`.cohen(i:SAME) -> num` gap of means, in pooled sds
 
 ```lua
 function SAME.cohen(i,    a,b,sd)
@@ -183,7 +183,7 @@ function SAME.cohen(i,    a,b,sd)
   return abs(a.mu - b.mu) / (sd + 1e-32) end
 ```
 
-`.cliffs(i:SAME) -> num`<br>how often xs out-ranks ys, 0..1
+`.cliffs(i:SAME) -> num` how often xs out-ranks ys, 0..1
 
 ```lua
 function SAME.cliffs(i,
@@ -196,7 +196,7 @@ function SAME.cliffs(i,
   return abs(gt - lt) / (#xs * #ys) end
 ```
 
-`.ks(i:SAME) -> num`<br>widest gap of two cdfs, in critical units
+`.ks(i:SAME) -> num` widest gap of two cdfs, in critical units
 
 ```lua
 function SAME.ks(i,
@@ -214,7 +214,7 @@ function SAME.ks(i,
 NUM and SYM share one protocol: add, div, norm, bin.  Each verb's
 two faces sit together below.  nVals is SYM's alone.
 
-`Num(txt:str, at:int) -> NUM`<br>! + -: goals.  X: skip.  A-Z: num
+`Num(txt:str, at:int) -> NUM` ! + -: goals.  X: skip.  A-Z: num
 
 ```lua
 function Num(txt,at)
@@ -223,7 +223,7 @@ function Num(txt,at)
                    w = txt:find"%-$" and 0 or 1}) end
 ```
 
-`Sym(txt:str, at:int) -> SYM`<br>a-z names; counts, not Welford
+`Sym(txt:str, at:int) -> SYM` a-z names; counts, not Welford
 
 ```lua
 function Sym(txt,at)
@@ -232,14 +232,14 @@ function Sym(txt,at)
                    w = txt:find"%-$" and 0 or 1}) end
 ```
 
-`nums(lst:list, f:fun) -> NUM`<br>lst, summarized in one num
+`nums(lst:list, f:fun) -> NUM` lst, summarized in one num
 
 ```lua
 function nums(lst,f,    i)
   i=Num(); for _,x in order(lst) do i:add(f(x)) end; return i end
 ```
 
-`.add(i:NUM, v:num)`<br>Welford's running mean and sd
+`.add(i:NUM, v:num)` Welford's running mean and sd
 
 ```lua
 function NUM.add(i,v,    d)
@@ -250,7 +250,7 @@ function NUM.add(i,v,    d)
   i.m2 = i.m2 + d * (v - i.mu) end
 ```
 
-`.add(i:SYM, v:str)`<br>one more of v
+`.add(i:SYM, v:str)` one more of v
 
 ```lua
 function SYM.add(i,v)
@@ -259,14 +259,14 @@ function SYM.add(i,v)
   i.has[v] = (i.has[v] or 0) + 1 end
 ```
 
-`.div(i:NUM) -> num`<br>standard deviation
+`.div(i:NUM) -> num` standard deviation
 
 ```lua
 function NUM.div(i)
   return i.n < 2 and 0 or sqrt(i.m2 / (i.n - 1)) end
 ```
 
-`.div(i:SYM) -> num`<br>entropy
+`.div(i:SYM) -> num` entropy
 
 ```lua
 function SYM.div(i,    f)
@@ -274,7 +274,7 @@ function SYM.div(i,    f)
   return sum(i.has, f) / log(2) end
 ```
 
-`.norm(i:NUM, v:num) -> atom`<br>logistic cdf, clipped at 3 sds
+`.norm(i:NUM, v:num) -> atom` logistic cdf, clipped at 3 sds
 
 ```lua
 function NUM.norm(i,v,    z)
@@ -284,13 +284,13 @@ function NUM.norm(i,v,    z)
   return 1 / (1 + exp(-1.7 * z)) end
 ```
 
-`.norm(i:SYM, v:str) -> atom`<br>syms pass through
+`.norm(i:SYM, v:str) -> atom` syms pass through
 
 ```lua
 function SYM.norm(i,v) return v end
 ```
 
-`.bin(i:NUM, v:num) -> atom`<br>v's bin, 1..the.bins
+`.bin(i:NUM, v:num) -> atom` v's bin, 1..the.bins
 
 ```lua
 function NUM.bin(i,v,    b)
@@ -299,13 +299,13 @@ function NUM.bin(i,v,    b)
   return b > the.bins and the.bins or b end
 ```
 
-`.bin(i:SYM, v:str) -> atom`<br>a sym is its own bin
+`.bin(i:SYM, v:str) -> atom` a sym is its own bin
 
 ```lua
 function SYM.bin(i,v) return v end
 ```
 
-`.nVals(i:SYM) -> int`<br>how many values i has seen
+`.nVals(i:SYM) -> int` how many values i has seen
 
 ```lua
 function SYM.nVals(i,    f)
@@ -316,7 +316,7 @@ function SYM.nVals(i,    f)
 
 ## tables
 
-`Tab(src:file) -> TAB`<br>a file name, or names then rows
+`Tab(src:file) -> TAB` a file name, or names then rows
 
 ```lua
 function Tab(src,    i)
@@ -326,7 +326,7 @@ function Tab(src,    i)
   return i end
 ```
 
-`.head(i:TAB, names:list)`<br>first row, read as names
+`.head(i:TAB, names:list)` first row, read as names
 
 ```lua
 function TAB.head(i,names,    col)
@@ -340,7 +340,7 @@ function TAB.head(i,names,    col)
     else i.x[#i.x + 1] = col end end end
 ```
 
-`.addRow(i:TAB, row:row) -> row`<br>add a row; the first is the names
+`.addRow(i:TAB, row:row) -> row` add a row; the first is the names
 
 ```lua
 function TAB.addRow(i,row)
@@ -350,7 +350,7 @@ function TAB.addRow(i,row)
   return row end
 ```
 
-`.clone(i:TAB, rows:list, how:str) -> TAB`<br>same columns, fresh summaries
+`.clone(i:TAB, rows:list, how:str) -> TAB` same columns, fresh summaries
 
 ```lua
 function TAB.clone(i,rows,how,
@@ -363,7 +363,7 @@ function TAB.clone(i,rows,how,
   return Tab(out) end
 ```
 
-`.ydist(i:TAB, row:row) -> num`<br>goals to heaven; 0 is best
+`.ydist(i:TAB, row:row) -> num` goals to heaven; 0 is best
 
 ```lua
 function TAB.ydist(i,row,    f)
@@ -372,7 +372,7 @@ function TAB.ydist(i,row,    f)
   return (sum(i.y, f) / #i.y) ^ (1 / the.p) end
 ```
 
-`.split(i:TAB) -> list`<br>two lists, 80:20, of a shuffled copy
+`.split(i:TAB) -> list` two lists, 80:20, of a shuffled copy
 
 ```lua
 function TAB.split(i,
@@ -386,7 +386,7 @@ function TAB.split(i,
 
 ## rmeans
 
-`Bins(col:NUM, rows:list, y:fun, all:NUM) -> BINS`<br>col's bins, and their worth
+`Bins(col:NUM, rows:list, y:fun, all:NUM) -> BINS` col's bins, and their worth
 
 ```lua
 function Bins(col,rows,y,all,
@@ -400,7 +400,7 @@ function Bins(col,rows,y,all,
   return i end
 ```
 
-`.weight(i:BINS, all:NUM) -> num`<br>variance i's bins cut off
+`.weight(i:BINS, all:NUM) -> num` variance i's bins cut off
 
 ```lua
 function BINS.weight(i,all,
@@ -410,7 +410,7 @@ function BINS.weight(i,all,
   return s > 0 and s or 0 end
 ```
 
-`Rmeans(tbl:TAB, rows:list, y:fun) -> RMEANS`<br>one bins per x column
+`Rmeans(tbl:TAB, rows:list, y:fun) -> RMEANS` one bins per x column
 
 ```lua
 function Rmeans(tbl,rows,y,
@@ -423,7 +423,7 @@ function Rmeans(tbl,rows,y,
   return i end
 ```
 
-`.guess(i:RMEANS, row:row) -> num`<br>bin means, m-estimated,
+`.guess(i:RMEANS, row:row) -> num` bin means, m-estimated,
 
 ```lua
 function RMEANS.guess(i,row,
@@ -439,7 +439,7 @@ function RMEANS.guess(i,row,
   return i.all.mu end
 ```
 
-`.prune(i:RMEANS, how:str) -> RMEANS`<br>after training, keep only
+`.prune(i:RMEANS, how:str) -> RMEANS` after training, keep only
 
 ```lua
 function RMEANS.prune(i,how,
@@ -453,7 +453,7 @@ function RMEANS.prune(i,how,
   return i end
 ```
 
-`.chance(i:RMEANS, b:atom) -> num`<br>variance k random bins would cut
+`.chance(i:RMEANS, b:atom) -> num` variance k random bins would cut
 
 ```lua
 function RMEANS.chance(i,b,
@@ -465,7 +465,7 @@ function RMEANS.chance(i,b,
 
 ## bayes
 
-`Nb(tbl:TAB, rows:list) -> NB`<br>a sub-table per klass, and a klass count
+`Nb(tbl:TAB, rows:list) -> NB` a sub-table per klass, and a klass count
 
 ```lua
 function Nb(tbl,rows,
@@ -480,7 +480,7 @@ function Nb(tbl,rows,
   return i end
 ```
 
-`.like(i:NB, sub:TAB, row:row) -> num`<br>log P(row|sub), m-estimated
+`.like(i:NB, sub:TAB, row:row) -> num` log P(row|sub), m-estimated
 
 ```lua
 function NB.like(i,sub,row,    f)
@@ -493,7 +493,7 @@ function NB.like(i,sub,row,    f)
          + sum(sub.x, f) end
 ```
 
-`.guess(i:NB, row:row) -> atom`<br>row's likeliest klass
+`.guess(i:NB, row:row) -> atom` row's likeliest klass
 
 ```lua
 function NB.guess(i,row,    f)
@@ -503,14 +503,14 @@ function NB.guess(i,row,    f)
 
 ## scoring
 
-`Bag() -> BAG`<br>blank counts, for one test set
+`Bag() -> BAG` blank counts, for one test set
 
 ```lua
 function Bag()
   return new(BAG, {n = 0, ok = 0, got = {}, want = {}, hit = {}}) end
 ```
 
-`.tally(i:BAG, want:str, got:str)`<br>one guess, into the bag
+`.tally(i:BAG, want:str, got:str)` one guess, into the bag
 
 ```lua
 function BAG.tally(i,want,got)
@@ -521,7 +521,7 @@ function BAG.tally(i,want,got)
   if want == got then i.hit[got] = (i.hit[got] or 0) + 1 end end
 ```
 
-`.parts(i:BAG, x:str) -> int`<br>x's tp, fp, fn and tn, counted so far
+`.parts(i:BAG, x:str) -> int` x's tp, fp, fn and tn, counted so far
 
 ```lua
 function BAG.parts(i,x,
@@ -532,7 +532,7 @@ function BAG.parts(i,x,
   return tp, fp, fn, i.n - fn - fp - tp end
 ```
 
-`.score1(i:BAG, x:str) -> num`<br>x's pd, pf, and d2h
+`.score1(i:BAG, x:str) -> num` x's pd, pf, and d2h
 
 ```lua
 function BAG.score1(i,x,
@@ -543,7 +543,7 @@ function BAG.score1(i,x,
   return r1, f1, sqrt((1 - r1) ^ 2 + f1 ^ 2) / sqrt(2) end
 ```
 
-`.score(i:BAG) -> num`<br>macro scores: one vote per klass
+`.score(i:BAG) -> num` macro scores: one vote per klass
 
 ```lua
 function BAG.score(i,

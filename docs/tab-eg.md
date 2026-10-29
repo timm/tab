@@ -38,7 +38,7 @@ reps  = 20
 
 ## files
 
-`exists(f:fun)`<br>is f a file we can read?
+`exists(f:fun)` is f a file we can read?
 
 ```lua
 function exists(f,    h)
@@ -47,7 +47,7 @@ function exists(f,    h)
   return h ~= nil end
 ```
 
-`home(f:fun)`<br>cache dir, mirroring moot's tree
+`home(f:fun)` cache dir, mirroring moot's tree
 
 ```lua
 function home(f)
@@ -57,7 +57,7 @@ function home(f)
 
 ## cache
 
-`pair(tbl:TAB, s:str)`<br>rep s's halves of tbl, by seed
+`pair(tbl:TAB, s:str)` rep s's halves of tbl, by seed
 
 ```lua
 function pair(tbl,s,    tr,te)
@@ -66,7 +66,7 @@ function pair(tbl,s,    tr,te)
   return tbl:clone(tr), tbl:clone(te) end
 ```
 
-`scored(file:file, who, fun, what)`<br>once
+`scored(file:file, who, fun, what)` once
 
 ```lua
 function scored(file,who,fun,what,    dir,f,h,tbl,t0,line,ok)
@@ -88,7 +88,7 @@ function scored(file,who,fun,what,    dir,f,h,tbl,t0,line,ok)
 
 ## learners
 
-`bayes(tr, te)`<br>learn tr, guess all of te
+`bayes(tr, te)` learn tr, guess all of te
 
 ```lua
 function bayes(tr,te,    nb,col,bag,trb)
@@ -99,7 +99,7 @@ function bayes(tr,te,    nb,col,bag,trb)
   return ("%.1f,%.1f,%.1f,%.3f"):format(bag:score()) end
 ```
 
-`goal(tbl:TAB)`<br>regression: that one column, in
+`goal(tbl:TAB)` regression: that one column, in
 
 ```lua
 function goal(tbl,    col)
@@ -116,7 +116,7 @@ function rmeans(tr,te,    y,lim)    -- the frugal arm: budget labels
   return score(Rmeans(tr, head1(tr.rows, lim), y), te, y) end
 ```
 
-`rmeansall(tr, te)`<br>the rich arm: every train row
+`rmeansall(tr, te)` the rich arm: every train row
 
 ```lua
 function rmeansall(tr,te,    y)
@@ -124,7 +124,7 @@ function rmeansall(tr,te,    y)
   return score(Rmeans(tr, tr.rows, y), te, y) end
 ```
 
-`head1(rows:list, n:int)`<br>rows' first n, or all of them
+`head1(rows:list, n:int)` rows' first n, or all of them
 
 ```lua
 function head1(rows,n,    out)
@@ -133,14 +133,14 @@ function head1(rows,n,    out)
   return out end
 ```
 
-`score(model, te, y:fun)`<br>where its top 5 sat, and its mae
+`score(model, te, y:fun)` where its top 5 sat, and its mae
 
 ```lua
 function score(model,te,y)
   return ("%.3f,%.6g"):format(top(model, te, y), mae(model, te, y)) end
 ```
 
-`top(model, te, y:fun)`<br>where its top 5 landed
+`top(model, te, y:fun)` where its top 5 landed
 
 ```lua
 function top(model,te,y,    ys,rows,g,best)
@@ -155,7 +155,7 @@ function top(model,te,y,    ys,rows,g,best)
   return 100 end
 ```
 
-`mae(model, te, y:fun)`<br>mean error of model's guesses
+`mae(model, te, y:fun)` mean error of model's guesses
 
 ```lua
 function mae(model,te,y,    num)
@@ -167,7 +167,7 @@ function mae(model,te,y,    num)
 
 ## reading it back
 
-`dirs(kind)`<br>every cached set of this kind
+`dirs(kind)` every cached set of this kind
 
 ```lua
 function dirs(kind,    out,h)
@@ -178,7 +178,7 @@ function dirs(kind,    out,h)
   return sorted(out) end
 ```
 
-`sorted(t:list)`<br>t's keys, in order
+`sorted(t:list)` t's keys, in order
 
 ```lua
 function sorted(t,    u)
@@ -188,7 +188,7 @@ function sorted(t,    u)
   return u end
 ```
 
-`readcol(dir, who, what)`<br>one result column
+`readcol(dir, who, what)` one result column
 
 ```lua
 function readcol(dir,who,what,    f,out,at,n)
@@ -205,7 +205,7 @@ function readcol(dir,who,what,    f,out,at,n)
   return #out > 0 and out or nil end
 ```
 
-`mid(xs:list)`<br>the median of xs
+`mid(xs:list)` the median of xs
 
 ```lua
 function mid(xs,    ys)
@@ -229,7 +229,7 @@ function versus(kind,who1,who2,what,big,    w,t,l,ma,mb,xs,ys)
 
 ## start up
 
-`.splits()`<br>what seed s gives, for checking
+`.splits()` what seed s gives, for checking
 
 ```lua
 function eg.splits(    tbl,tr,te)
@@ -238,7 +238,7 @@ function eg.splits(    tbl,tr,te)
   print(#tr.rows, #te.rows, table.concat(tr.rows[1], ",")) end
 ```
 
-`.report()`<br>what the cache says, so far
+`.report()` what the cache says, so far
 
 ```lua
 function eg.report()
