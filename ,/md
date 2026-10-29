@@ -3,19 +3,21 @@
 # usage: ./md [file.lua ...]     (no arguments: do the lot)
 #
 # README holds the one copy of the logo and the menubar, with links
-# written from the root.  Every other page gets that same block,
-# re-aimed at where that page sits, so changing the menu means
-# changing README and running this.
+# written from the root.  A page's banner is everything above its
+# first "# title", so README's banner is everything above "# tab".
+# Every other page gets that same block, re-aimed at where that page
+# sits, so changing the menu means changing README and running this.
 cd "$(git rev-parse --show-toplevel)" || exit 1
 grep -q '^<<<<<<< ' README.md &&                 # else the markers
   { echo "README.md has conflict markers"; exit 1; }   # go everywhere
+head -1 README.md | grep -q '^# ' &&             # else the banner is
+  { echo "README.md starts with its title; move it below the menubar";
+    exit 1; }                                    # the whole file
 [ $# -gt 0 ] && files=("$@") || files=(tab.lua tab-eg.lua)
 
 banner() {                      # the banner, aimed at directory $1
-  gawk 'BEGIN {RS = ""; FS = "\n"}
-        $1 ~ /^#/      {next}                  # not the title
-        $1 ~ /^(<|\[)/ {print $0 "\n"; next}   # logo, menubar
-                       {exit}' README.md |
+  gawk 'BEGIN {RS = "\n# "}     # so record one is all above the title
+        {sub(/\n+$/, ""); print $0 "\n"; exit}' README.md |
   case "$1" in
     .)    cat ;;                               # root: as written
     docs) sed 's|](docs/|](|g; s|src="docs/|src="|g';;

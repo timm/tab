@@ -14,7 +14,10 @@ if setfenv then setfenv(1, min) end          -- tab's _ENV is ours too
 local _ENV = min
 the = cli()                         -- tab's options, off our cli
 
-cache = (os.getenv"HOME" or "~") .. "/tmp/cache"
+cache = os.getenv"CACHE"           -- ../tab-dev/cache, if ,/sh
+if not cache or cache == "" then   -- "" is true in lua, so an
+  cache = (os.getenv"HOME" or "~") .. "/tmp/cache" end -- empty
+                                   -- CACHE must be caught here
 reps  = 20
 
 -- ---- files -----------------------------------------------------------
@@ -57,12 +60,14 @@ function bayes(tr,te,    nb,col,bag,trb) -- learn tr, guess all of te
     bag:tally(row[col.at], nb:guess(row)) end
   return ("%.1f,%.1f,%.1f,%.3f"):format(bag:score()) end
 
-function goal(tbl,    col)          -- one num goal: it.  else: ydist
-  col = #tbl.y == 1 and getmetatable(tbl.y[1]) == NUM and tbl.y[1]
+function goal(tbl,    col)          -- regression: that one column, in
+  col = (the.file or ""):find"/regression/"   -- its own units, which is
+        and #tbl.y == 1 and getmetatable(tbl.y[1]) == NUM and tbl.y[1]
   if col then
     return function(row) return tonumber(row[col.at]) or col.mu end end
-  return function(row) return tbl:ydist(row) end end
-
+  return function(row) return tbl:ydist(row) end end -- else ydist: 0 is
+                                    -- best whatever col.w says, and mae
+                                    -- then compares across sets
 function rmeans(tr,te,    y,lim)    -- the frugal arm: budget labels
   y   = goal(tr)
   lim = the.budget - the.check

@@ -1,12 +1,16 @@
-# tab
-
 <p align="center"><img src="docs/logo.png"></p>
+
+<div align="center">
 
 [lua 101](docs/lua101.md) ·
 [lua, more](docs/luamore.md) ·
 [tab.lua](docs/tab.md) ·
 [tab-eg.lua](docs/tab-eg.md) ·
 [license](https://github.com/timm/tab/blob/main/LICENSE.md)
+
+</div>
+
+# tab
 
 Fast inference over tables for classification, regression, optimization. A good guess from a few dozen labels. Range means, shrunk to the
 grand mean, weighed by variance. Lua, no dependencies, one file.

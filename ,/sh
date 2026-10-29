@@ -2,6 +2,10 @@
 # sh: a work shell for tab. usage: ,/sh
 Here="$(cd "$(dirname "$0")/.." && pwd)"
 export MOOT=${MOOT:-$HOME/gits/moot}
+# experiments belong next door (see CLAUDE.md), so if the sibling
+# repo is there, scores go to it rather than to ~/tmp
+Dev="$(cd "$Here/../tab-dev" 2>/dev/null && pwd)"
+export CACHE=${CACHE:-${Dev:+$Dev/cache}}
 export CACHE=${CACHE:-$HOME/tmp/cache}
 export PATH="$Here/,:$PATH"
 exec bash --init-file <(cat <<EOF
