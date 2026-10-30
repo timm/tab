@@ -31,14 +31,10 @@ abs, min, max = math.abs, math.min, math.max
 TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME,BEST = {},{},{},{},{},{},{},{},{}
 
 -- ---- misc ---------------------------------------------------------
--- Connect the instance `i` to its class `meta`.  `it` names that
--- class, so `col.it == SYM` asks what `getmetatable(col) == SYM`
--- asked.  It is set on the class, not the instance, so it costs one
--- field for all of them and `copy`'s `pairs` never finds it -- which
--- matters, since copying it would deep copy the class itself.
+-- Connect instance `i` to its class `meta`; `meta.it` names the
+-- class, so `col.it == SYM` asks what getmetatable() asked.
 function new(meta,i) --> inst
-  meta.__index, meta.it = meta, meta
-  return setmetatable(i, meta) end
+  meta.__index, meta.it = meta, meta; return setmetatable(i, meta) end
 
 -- Update `the` from the command line: a flag, an action, or a file.
 function cli(k,v) --> dict
@@ -75,11 +71,8 @@ function best(t,fn,    n,m,u) --> any
     if not n or m > n then n, u = m, k end end
   return u, n end
 
--- Return a BEST: the best thing shown to it so far, in `has`, and
--- that thing's score, in `score`.  `cmp` says what best means, so
--- `lt` keeps the smallest.  Where `best` wants a whole collection in
--- hand, this takes a scan one item at a time, and so can ride along
--- with a scan that is running anyway.
+-- Return a BEST: the best thing shown to it so far (`has`) and its
+-- `score`; `cmp` says what best means, so `lt` keeps the smallest.
 function Best(cmp) --> BEST
   return new(BEST, {cmp = cmp}) end
 
@@ -97,13 +90,18 @@ function same(x) return x end --> any
 -- Return true when `a` sorts before `b`.
 function lt(a,b) return a < b end --> bool
 
--- Return `ipairs(t)`, or, given `fn`, that of a sorted copy.  `fn`
--- is a comparator, or a cell index to sort rows on.
-function order(t,fn,    u,at) --> fun
-  if not fn then return ipairs(t) end -- copy's ipairs. fn: a comparator,
-  if type(fn) ~= "function" then     -- or a cell index to sort rows on
-    at = fn; fn = function(a,b) return a[at] < b[at] end end
-  u = map(t, same); table.sort(u, fn); return ipairs(u) end
+-- Return `t`, sorted in place, ascending.  `fn` is a comparator; or
+-- a key -- a cell index, a field name -- to sort on; or nothing.
+function sort(t,fn,    k) --> list
+  if fn and type(fn) ~= "function" then
+    k = fn; fn = function(a,b) return a[k] < b[k] end end
+  table.sort(t, fn)
+  return t end
+
+-- Return `ipairs(t)`, or, given `fn`, that of a sorted copy.
+function order(t,fn) --> fun
+  if not fn then return ipairs(t) end
+  return ipairs(sort(map(t, same), fn)) end
 
 -- Return `x:atom` as text, with nums cut to `the.decs` decimals.
 -- Whole numbers stay whole, so a count of 318 is not "318.00".
@@ -141,7 +139,7 @@ function csv(file,    rows,s) --> rows
 -- ---- stats -----------------------------------------------------------
 -- Return two samples, `xs` and `ys`, sorted, ready to compare.
 function Same(xs,ys,    fn) --> SAME
-  fn = function(t,    u)     u=map(t, same); table.sort(u); return u end 
+  fn = function(t) return sort(map(t, same)) end
   return new(SAME, {xs = fn(xs), ys = fn(ys)}) end
 
 -- Return true when all three tests call `i.xs` and `i.ys` the same.
@@ -193,10 +191,8 @@ function Sym(txt,at) --> SYM
 function nums(lst,fn,    i) --> NUM
   i=Num(); for _,x in order(lst) do i:add(fn(x)) end; return i end
 
--- Add `v:atom` to `i`, keeping Welford's running mean and sd.  `inc`
--- of -1 takes `v` back out: the same three lines with their signs
--- flipped.  That is what lets one left-to-right scan move a row from
--- the right of a cut to its left without recounting either side.
+-- Add `v:atom` to `i`: Welford's running mean and sd.  `inc` of -1
+-- takes `v` back out, so a scan can shift rows across a cut.
 function NUM.add(i,v,inc,    d) --> nil
   if v == "?" then return end
   inc = inc or 1

@@ -115,8 +115,7 @@ function dirs(kind,    out,h)       -- every cached set of this kind
 function sorted(t,    u)            -- t's keys, in order
   u = {}
   for k in pairs(t) do u[#u + 1] = k end
-  table.sort(u)
-  return u end
+  return sort(u) end
 
 function readcol(dir,who,what,    f,out,at,n) -- one result column
   f = io.open(("%s/%s.csv"):format(dir, who))
@@ -132,8 +131,7 @@ function readcol(dir,who,what,    f,out,at,n) -- one result column
   return #out > 0 and out or nil end
 
 function mid(xs,    ys)             -- the median of xs
-  ys = map(xs, same)
-  table.sort(ys)
+  ys = sort(map(xs, same))
   return #ys == 0 and 0 or (#ys % 2 == 1 and ys[(#ys+1)/2]
                             or (ys[#ys/2] + ys[#ys/2+1]) / 2) end
 
