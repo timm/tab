@@ -22,14 +22,8 @@ flags:
 ]]
 for k, v in usage:gmatch"\n%s+(%a+)=(%S+)" do the[k] = thing(v) end
 
--- ---- misc ------------------------------------------------------------
--- Return the mean absolute error of `fn` against `y` over `rows`.
-function mae(rows,y,fn,    err) --> num
-  err = function(row) return abs(y(row) - fn(row)) end
-  return nums(rows, err).mu end
-
--- ---- cuts ------------------------------------------------------------
--- Return expected value of  diversity of `a` and `b`.
+-- ---- growing ---------------------------------------------------------
+-- Return the expected value of the diversity of `a` and `b`.
 function val(a,b) --> num
   return (a:div()*a.n + b:div()*b.n) / (a.n + b.n) end
 
@@ -37,7 +31,6 @@ function val(a,b) --> num
 function big(lo,n) --> bool
   return the.leaf <= lo and lo <= n - the.leaf end
 
--- ---- growing ---------------------------------------------------------
 -- Return a tree over `rows` of `tbl:TAB`, scored on `y`.
 function Tree(tbl,rows,y) --> NODE
   return Node(tbl, rows or tbl.rows,
@@ -74,65 +67,46 @@ function Node(tbl,rows,y,lvl,    i,v,pay,cut,a,b,t) --> NODE
 function NODE.cut(i,    out,xy,x,tot,d,b,lhs) --> dict
   out = Best(lt)                     -- least diversity left behind
   for _, col in order(i.sub.x) do
-    xy = {}
-    for _, row in order(i.rows) do
-      x = row[col.at]                -- y is already paid for
-      if x ~= "?" then xy[#xy+1] = {x, i.ys[row]} end end
-    tot = nums(xy, function(p) return p[2] end)
+    xy, tot = {}, Num()            -- y is already paid for; one
+    for _, row in order(i.rows) do -- pass fills xy and sums it
+      x = row[col.at]
+      if x ~= "?" then xy[#xy+1] = {x=x, y=tot:add(i.ys[row])} end end
     if col.it == SYM then
       d = {}
       for _, p in order(xy) do
-        b = d[p[1]] or Num(); b:add(p[2]); d[p[1]] = b end
+        b = d[p.x] or Num(); b:add(p.y); d[p.x] = b end
       for v, lhs in pairs(d) do
         if big(lhs.n, #xy) then
           out:add(val(lhs, tot - lhs), {col = col, bin = v}) end end
     else
-      sort(xy, 1)
+      sort(xy, "x")
       lhs = Num()
       for j, p in order(xy) do
-        lhs:add(p[2])
-        if j < #xy and p[1] ~= xy[j+1][1] and big(j, #xy) then
-          out:add(val(lhs, tot-lhs), {col = col, bin = p[1]}) end end
+        lhs:add(p.y)
+        if j < #xy and p.x ~= xy[j+1].x and big(j, #xy) then
+          out:add(val(lhs, tot-lhs), {col = col, bin = p.x}) end end
     end end
   return out.has end
 
 -- ---- asking ----------------------------------------------------------
--- Return the leaf of `i` that `row` falls into.
-function NODE.leaf(i,row,    c) --> NODE
+-- Return the mean absolute error of `fn` against `y` over `rows`.
+function mae(rows,y,fn,    err) --> num
+  err = function(row) return abs(y(row) - fn(row)) end
+  return nums(rows, err).mu end
+
+-- Return the leaf `row` falls into: its `mu` is the guess for
+-- `row`, and its `row` the payload -- the best labelled row there.
+function NODE.pick(i,row,    c) --> NODE
   if not i.at then return i end
   c = i.at
   return (c.col:holds(row[c.col.at], c.bin) and i.left
-          or i.right):leaf(row) end
+          or i.right):pick(row) end
 
--- Return `row`'s guess: the mean of the leaf it falls into.
-function NODE.guess(i,row) --> num
-  return i:leaf(row).mu end
-
--- Return the best row seen where `row` lands: the leaf's payload.
-function NODE.pick(i,row) --> row
-  return i:leaf(row).row end
-
--- Return how deep `i` actually grew.
-function NODE.depth(i) --> int
-  return i.at and max(i.left:depth(), i.right:depth()) or i.lvl end
-
--- Return a print width for `col`: its name, plus some air.
-function wide(col) --> int
-  return max(10, #col.txt + 2) end
-
--- Return `i`'s goal names, as a header for `goals`.
-function NODE.heads(i,    t) --> str
+-- Return one cell per y column -- `f(col)` -- padded to fit.
+function NODE.ycols(i,f,    t) --> str
   t = {}
   for k, col in order(i.sub.y) do
-    t[k] = ("%" .. wide(col) .. "s"):format(col.txt) end
-  return table.concat(t) end
-
--- Return `i`'s goals: each y column's mean (or mode), own units.
-function NODE.goals(i,    t,v) --> str
-  t = {}
-  for k, col in order(i.sub.y) do
-    v = col.it == NUM and str(col.mu) or best(col.has, same)
-    t[k] = ("%" .. wide(col) .. "s"):format(v) end
+    t[k] = ("%" .. max(10, #col.txt + 2) .. "s"):format(f(col)) end
   return table.concat(t) end
 
 -- Call `f(node,s)` on `i` and everything below, pre-order; `s` is
@@ -145,22 +119,22 @@ function NODE.walk(i,f,s,    c,op) --> nil
     i.left:walk(f, c.col.txt.." "..op[1].." "..str(c.bin))
     i.right:walk(f, c.col.txt.." "..op[2].." "..str(c.bin)) end end
 
--- Return `i`'s leaves, in print order.
-function NODE.leaves(i,    u) --> list
-  u={}; i:walk(function(n) if not n.at then u[#u+1]=n end end)
-  return u end
-
 -- Print `i`, one line per node, ticking the best leaf and crossing
 -- the worst (as utf8 bytes: lua 5.1 has no \u{} escape).
-function NODE.show(i,    t,ends) --> nil
-  ends, t = {}, sort(i:leaves(), "mu")
+function NODE.show(i,    t,ends,cell) --> nil
+  cell = function(col)
+    return col.it == NUM and str(col.mu) or best(col.has, same) end
+  t, ends = {}, {}
+  i:walk(function(n) if not n.at then t[#t + 1] = n end end)
+  sort(t, "mu")
   ends[t[#t]] = " \226\156\151 "            -- cross the worst leaf,
   ends[t[1]]  = " \226\156\147 "            -- tick the best one
-  print(("%-26s %5s %6s   %s"):format("", "n", "mu", i:heads()))
+  print(("%-26s %5s %6s   %s"):format("", "n", "mu",
+        i:ycols(function(col) return col.txt end)))
   i:walk(function(n,s)
     print(("%-26s %5d %6s%s%s"):format(
             ("|  "):rep(max(0, n.lvl - 2)) .. s,   -- root gets no bar
-            n.n, str(n.mu), ends[n] or "   ", n:goals())) end)
+            n.n, str(n.mu), ends[n] or "   ", n:ycols(cell))) end)
   print"" end
 
 -- ---- start up --------------------------------------------------------
@@ -176,20 +150,21 @@ function eg.tree(    tr,te,y) --> nil
   tr, te, y = halves()
   Tree(tr, tr.rows, y):show() end
 
-function eg.all(    tr,te,y,i,lo,m1,m2) --> nil
+function eg.all(    tr,te,y,i,lo,m1,m2,d) --> nil
   tr, te, y = halves()
   i  = Tree(tr, tr.rows, y)
   assert(i.n == #tr.rows, "root holds every training row")
   lo = i.lo
   for _, row in order(tr.rows) do          -- the payload is the best
     assert(y(row) >= lo - 1e-6, "payload is not the best row") end
-  assert(i:depth() <= the.depth, "tree grew past depth")
-  for _, row in order(te.rows) do          -- every row reaches a leaf,
-    assert(i:pick(row), "a row reached no payload")   -- so every row
-    assert(i:guess(row) == i:leaf(row).mu) end        -- has an answer
-  m1 = mae(te.rows, y, function(row) return i:guess(row) end)
+  d = 0
+  i:walk(function(n) d = max(d, n.lvl) end)
+  assert(d <= the.depth, "tree grew past depth")
+  for _, row in order(te.rows) do          -- every row reaches a
+    assert(i:pick(row).row, "a row reached no payload") end -- leaf
+  m1 = mae(te.rows, y, function(row) return i:pick(row).mu end)
   m2 = mae(te.rows, y, function() return i.mu end)
-  print("tree", m1, "grand mean", m2, "depth", i:depth())
+  print("tree", m1, "grand mean", m2, "depth", d)
   assert(m1 < m2, "tree lost to the grand mean")
   print"PASS tree" end
 

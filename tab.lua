@@ -191,26 +191,28 @@ function Sym(txt,at) --> SYM
 function nums(lst,fn,    i) --> NUM
   i=Num(); for _,x in order(lst) do i:add(fn(x)) end; return i end
 
--- Add `v:atom` to `i`: Welford's running mean and sd.  `inc` of -1
--- takes `v` back out, so a scan can shift rows across a cut.
-function NUM.add(i,v,inc,    d) --> nil
-  if v == "?" then return end
+-- Add `v:atom` to `i`, returning `v`: Welford's running mean and
+-- sd.  `inc` of -1 takes `v` back out, so a scan can shift a row.
+function NUM.add(i,v,inc,    d) --> atom
+  if v == "?" then return v end
   inc = inc or 1
   i.n = i.n + inc
-  if i.n <= 0 then i.n, i.mu, i.m2 = 0, 0, 0; return end
+  if i.n <= 0 then i.n, i.mu, i.m2 = 0, 0, 0; return v end
   d    = v - i.mu
   i.mu = i.mu + inc * d / i.n
-  i.m2 = i.m2 + inc * d * (v - i.mu) end
+  i.m2 = i.m2 + inc * d * (v - i.mu)
+  return v end
 
 -- Add one more `v:atom` to `i`'s counts.  `inc` of -1 takes one away,
 -- and a count falling to zero leaves `has` outright: `div` sums over
 -- those keys, and log(0) is nothing to add up.
-function SYM.add(i,v,inc) --> nil
-  if v == "?" then return end
+function SYM.add(i,v,inc) --> atom
+  if v == "?" then return v end
   inc = inc or 1
   i.n = i.n + inc
   i.has[v] = (i.has[v] or 0) + inc
-  if i.has[v] <= 0 then i.has[v] = nil end end
+  if i.has[v] <= 0 then i.has[v] = nil end
+  return v end
 
 -- Return what is left of `i` once `j` is taken out of it: the other
 -- side of a cut, in closed form.  Pooling says `i.m2` is its parts'
