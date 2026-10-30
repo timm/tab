@@ -65,7 +65,7 @@ function bayes(tr,te,    nb,col,bag,trb) -- learn tr, guess all of te
 -- is heaven whatever `col.w` says, so `mae` compares across sets.
 function goal(tbl,    col) --> fn
   col = (the.file or ""):find"/regression/"
-        and #tbl.y == 1 and getmetatable(tbl.y[1]) == NUM and tbl.y[1]
+        and #tbl.y == 1 and tbl.y[1].it == NUM and tbl.y[1]
   if col then
     return function(row) return tonumber(row[col.at]) or col.mu end end
   return function(row) return tbl:ydist(row) end end

@@ -29,26 +29,46 @@ function mae(rows,y,fn,    err) --> num
   return nums(rows, err).mu end
 
 -- ---- cuts ------------------------------------------------------------
--- Return where to cut `col`: a NUM at the bin holding its mean, a
--- SYM at its most common value.  One cut point, not a scan of all
--- of them, because the column was already chosen on its bins.
-function at(col,    fn) --> atom
-  if getmetatable(col) == NUM then return col:bin(col.mu) end
-  fn = function(n) return n end
-  return (best(col.has, fn)) end
+-- Return the mean diversity `a` and `b` leave behind, weighed by
+-- their sizes.  Less is better.  No baseline is wanted, since every
+-- candidate cut of a node shares it, and `div` means sd or entropy
+-- as the y column asks, so this one line scores either kind.
+function val(a,b) --> num
+  return (a:div()*a.n + b:div()*b.n) / (a.n + b.n) end
 
--- Return true when `row` belongs on `cut`'s left: at or below the
--- bin for a NUM, equal to the value for a SYM.  An unknown goes
--- left, where the first cut put the rows we knew most about.
-function left(cut,row,    v) --> bool
-  v = cut.col:bin(row[cut.col.at])
-  if v == "?" then return true end
-  if getmetatable(cut.col) == SYM then return v == cut.bin end
-  return v <= cut.bin end
+-- Return true when a cut at the `lo`th of `n` rows leaves `the.leaf`
+-- of them on both sides.
+function big(lo,n) --> bool
+  return the.leaf <= lo and lo <= n - the.leaf end
+
+-- Offer `best` every cut of `col` over `xy`, its {x,y} pairs, scored
+-- against `tot`, the y summary of all of them.  A SYM has one cut
+-- per value.  A NUM has one between each pair of neighbouring
+-- distinct x: one sorted pass, growing the left summary, with the
+-- right always `tot` less the left and so never built at all.
+function SYM.cuts(col,xy,tot,best,    d,b) --> nil
+  d = {}
+  for _, p in order(xy) do
+    b = d[p[1]] or Num(); b:add(p[2]); d[p[1]] = b end
+  for v, lhs in pairs(d) do
+    if big(lhs.n, #xy) then
+      best:add(val(lhs, tot - lhs), {col = col, bin = v}) end end end
+
+function NUM.cuts(col,xy,tot,best,    lhs) --> nil
+  table.sort(xy, function(p,q) return p[1] < q[1] end)
+  lhs = Num()
+  for j, p in order(xy) do
+    lhs:add(p[2])
+    if j < #xy and p[1] ~= xy[j+1][1] and big(j, #xy) then
+      best:add(val(lhs, tot - lhs), {col = col, bin = p[1]}) end end end
+
+-- Return true when `row` is on `cut`'s left.
+function left(cut,row) --> bool
+  return cut.col:holds(row[cut.col.at], cut.bin) end
 
 -- Return `cut` as text, read going left (`how`=1) or right.
 function says(cut,how,    op) --> str
-  op = getmetatable(cut.col) == SYM and {"==", "~="} or {"<=", ">"}
+  op = cut.col.it == SYM and {"==", "~="} or {"<=", ">"}
   return cut.col.txt .. " " .. op[how] .. " " .. str(cut.bin) end
 
 -- ---- growing ---------------------------------------------------------
@@ -62,24 +82,28 @@ function Tree(tbl,rows,y) --> NODE
 -- Return one node over `rows`.  One pass and one `<` gets both the
 -- spread and the payload: the best row seen is just the best so far,
 -- then one more row, then maybe a replacement.
-function Node(tbl,rows,y,lvl,    i,v) --> NODE
-  i = new(NODE, {tbl = tbl, rows = rows, y = y, lvl = lvl, n = #rows,
-                 sub = tbl:clone(rows), all = Num(), ys = {}})
+function Node(tbl,rows,y,lvl,    i,v,pay) --> NODE
+  i   = new(NODE, {tbl = tbl, rows = rows, y = y, lvl = lvl, n = #rows,
+                   sub = tbl:clone(rows), all = Num(), ys = {}})
+  pay = Best(lt)                        -- the payload: least y so far
   for _, row in order(rows) do
     v = y(row); i.ys[row] = v; i.all:add(v)
-    if not i.row or v < i.lo then i.row, i.lo = row, v end end
-  i.mu = i.all.mu
+    pay:add(v, row) end
+  i.row, i.lo, i.mu = pay.has, pay.score, i.all.mu
   return i end
 
--- Return where to cut `i.rows`: the column whose bins cut the most
--- variance off `i.all`, at that column's own cut point.  This is the
--- same test `rmeans` weighs its columns by.
-function NODE.cut(i,    y,fn,k,col) --> dict
-  y   = function(row) return i.ys[row] end     -- y, already paid for
-  fn  = function(col) return Bins(col, i.rows, y, i.all).w end
-  k   = best(i.sub.x, fn)
-  col = k and i.sub.x[k]
-  return col and {col = col, bin = at(col)} end
+-- Return where to cut `i.rows`: over every x column, every cut it
+-- allows, and whichever leaves the least diversity behind.  Column
+-- and cut point answer to one test, not two.
+function NODE.cut(i,    out,xy,x) --> dict
+  out = Best(lt)                     -- least diversity left behind
+  for _, col in order(i.sub.x) do
+    xy = {}
+    for _, row in order(i.rows) do
+      x = row[col.at]                -- y is already paid for
+      if x ~= "?" then xy[#xy+1] = {x, i.ys[row]} end end
+    col:cuts(xy, nums(xy, function(p) return p[2] end), out) end
+  return out.has end
 
 -- Return `i`, grown: a cut and two grown kids, or just itself.
 function NODE.grow(i,    cut,a,b,t) --> NODE
@@ -114,15 +138,61 @@ function NODE.pick(i,row) --> row
 function NODE.depth(i) --> int
   return i.at and max(i.left:depth(), i.right:depth()) or i.lvl end
 
--- Print `i`, one indented line per node: rows, mean, and the `y` of
--- its payload.
-function NODE.show(i,s,    pad) --> nil
-  pad = ("|  "):rep(i.lvl - 1)
-  print(("%-32s n=%-5d mu=%-6s lo=%s"):format(
-          pad .. (s or "root"), i.n, str(i.mu), str(i.lo)))
+-- Return how wide `col`'s column has to be: enough for its name,
+-- and never so narrow that two columns touch.
+function wide(col) --> int
+  return max(10, #col.txt + 2) end
+
+-- Return `i`'s goal names, as a header for `goals`.
+function NODE.heads(i,    t) --> str
+  t = {}
+  for k, col in order(i.sub.y) do
+    t[k] = ("%" .. wide(col) .. "s"):format(col.txt) end
+  return table.concat(t) end
+
+-- Return `i`'s goals: each y column's own mean, in its own units,
+-- or its most common value where that column is a SYM.  `mu` and
+-- `lo` are one 0..1 distance over all of them; these are the parts.
+function NODE.goals(i,    t,v) --> str
+  t = {}
+  for k, col in order(i.sub.y) do
+    v = col.it == NUM and str(col.mu) or best(col.has, same)
+    t[k] = ("%" .. wide(col) .. "s"):format(v) end
+  return table.concat(t) end
+
+-- Return `i`'s leaves, gathered into `t`, in print order.
+function NODE.leaves(i,t) --> list
+  t = t or {}
+  if i.at then i.left:leaves(t); i.right:leaves(t)
+  else         t[#t + 1] = i end
+  return t end
+
+-- Return which leaf to tick and which to cross: the lowest and the
+-- highest mean `y`.  U+2713 and U+2717 as their utf8 bytes, since
+-- luajit is lua 5.1 and has no \u{} escape to write them with.
+function NODE.ends(i,    t,out,k) --> dict
+  t, out = i:leaves(), {}
+  k = best(t, function(node) return  node.mu end)
+  out[t[k]] = " \226\156\151 "              -- the worst leaf
+  k = best(t, function(node) return -node.mu end)
+  out[t[k]] = " \226\156\147 "              -- and the best one
+  return out end
+
+-- Print `i`, one line per node: the cut that got us here, how many
+-- rows it holds, its mean `y` distance, a mark on the best and the
+-- worst leaf, then every goal.  The root call has no cut to name,
+-- so that is where the header and the marking go.
+function NODE.show(i,s,ends,    pad) --> nil
+  if not s then
+    ends = i:ends()
+    print(("%-26s %5s %6s   %s"):format("", "n", "mu", i:heads())) end
+  pad = ("|  "):rep(max(0, i.lvl - 2))       -- the root needs no bar
+  print(("%-26s %5d %6s%s%s"):format(
+          pad .. (s or ""), i.n, str(i.mu), ends[i] or "   ", i:goals()))
   if i.at then
-    i.left:show(says(i.at, 1))
-    i.right:show(says(i.at, 2)) end end
+    i.left:show(says(i.at, 1), ends)
+    i.right:show(says(i.at, 2), ends) end
+  if not s then print"" end end        -- the root frame ends the tree
 
 -- ---- start up --------------------------------------------------------
 -- Return `the.file` as train and test TABs, and the `y` to score

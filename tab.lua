@@ -28,12 +28,17 @@ actions:
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
 
-TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME = {},{},{},{},{},{},{},{}
+TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME,BEST = {},{},{},{},{},{},{},{},{}
 
 -- ---- misc ---------------------------------------------------------
--- Connect the instance `i` to its class `meta`.
+-- Connect the instance `i` to its class `meta`.  `it` names that
+-- class, so `col.it == SYM` asks what `getmetatable(col) == SYM`
+-- asked.  It is set on the class, not the instance, so it costs one
+-- field for all of them and `copy`'s `pairs` never finds it -- which
+-- matters, since copying it would deep copy the class itself.
 function new(meta,i) --> inst
-  meta.__index = meta; return setmetatable(i, meta) end
+  meta.__index, meta.it = meta, meta
+  return setmetatable(i, meta) end
 
 -- Update `the` from the command line: a flag, an action, or a file.
 function cli(k,v) --> dict
@@ -69,6 +74,22 @@ function best(t,fn,    n,m,u) --> any
     m = fn(v, k)
     if not n or m > n then n, u = m, k end end
   return u, n end
+
+-- Return a BEST: the best thing shown to it so far, in `has`, and
+-- that thing's score, in `score`.  `cmp` says what best means, so
+-- `lt` keeps the smallest.  Where `best` wants a whole collection in
+-- hand, this takes a scan one item at a time, and so can ride along
+-- with a scan that is running anyway.
+function Best(cmp) --> BEST
+  return new(BEST, {cmp = cmp}) end
+
+-- Show `i` a `payload` scoring `score`; return what `i` holds now.
+-- Here is the best so far, here is one more thing: one compare, then
+-- maybe a swap.  Nothing rejected is kept, so nothing is scanned twice.
+function BEST.add(i,score,payload) --> any
+  if i.score == nil or i.cmp(score, i.score) then
+    i.score, i.has = score, payload end
+  return i.has end
 
 -- Return `x`.
 function same(x) return x end --> any
@@ -172,23 +193,43 @@ function Sym(txt,at) --> SYM
 function nums(lst,fn,    i) --> NUM
   i=Num(); for _,x in order(lst) do i:add(fn(x)) end; return i end
 
--- Add `v:atom` to `i`, keeping Welford's running mean and sd.
-function NUM.add(i,v,    d) --> nil
+-- Add `v:atom` to `i`, keeping Welford's running mean and sd.  `inc`
+-- of -1 takes `v` back out: the same three lines with their signs
+-- flipped.  That is what lets one left-to-right scan move a row from
+-- the right of a cut to its left without recounting either side.
+function NUM.add(i,v,inc,    d) --> nil
   if v == "?" then return end
-  i.n = i.n + 1
-  d = v - i.mu
-  i.mu = i.mu + d / i.n
-  i.m2 = i.m2 + d * (v - i.mu) end
+  inc = inc or 1
+  i.n = i.n + inc
+  if i.n <= 0 then i.n, i.mu, i.m2 = 0, 0, 0; return end
+  d    = v - i.mu
+  i.mu = i.mu + inc * d / i.n
+  i.m2 = i.m2 + inc * d * (v - i.mu) end
 
--- Add one more `v:atom` to `i`'s counts.
-function SYM.add(i,v) --> nil
+-- Add one more `v:atom` to `i`'s counts.  `inc` of -1 takes one away,
+-- and a count falling to zero leaves `has` outright: `div` sums over
+-- those keys, and log(0) is nothing to add up.
+function SYM.add(i,v,inc) --> nil
   if v == "?" then return end
-  i.n = i.n + 1
-  i.has[v] = (i.has[v] or 0) + 1 end
+  inc = inc or 1
+  i.n = i.n + inc
+  i.has[v] = (i.has[v] or 0) + inc
+  if i.has[v] <= 0 then i.has[v] = nil end end
+
+-- Return what is left of `i` once `j` is taken out of it: the other
+-- side of a cut, in closed form.  Pooling says `i.m2` is its parts'
+-- m2 plus n1*n2/n times their gap squared, so read that backwards.
+function NUM.__sub(i,j,    n,d) --> NUM
+  n = i.n - j.n
+  if n < 1 then return Num(i.txt, i.at) end
+  d = j.mu - i.mu
+  return new(NUM, {txt = i.txt, at = i.at, w = i.w, n = n,
+                   mu = (i.n*i.mu - j.n*j.mu) / n,
+                   m2 = max(0, i.m2 - j.m2 - d*d*i.n*j.n/n)}) end
 
 -- Return `i`'s standard deviation.
 function NUM.div(i) --> num
-  return i.n < 2 and 0 or sqrt(i.m2 / (i.n - 1)) end
+  return i.n < 2 and 0 or sqrt(max(i.m2, 0) / (i.n - 1)) end
 
 -- Return `i`'s entropy.
 function SYM.div(i,    fn) --> num
@@ -204,6 +245,11 @@ function NUM.norm(i,v,    z) --> atom
 
 -- Return `v:atom` unchanged: syms do not normalize.
 function SYM.norm(i,v) return v end --> atom
+
+-- Return true when cell `x` is on `v`'s side of a cut.  An unknown
+-- says yes to everything, so a cut never loses a row.
+function SYM.holds(i,x,v) return x == "?" or x == v end --> bool
+function NUM.holds(i,x,v) return x == "?" or x <= v end --> bool
 
 -- Return `v:atom`'s bin, 1..`the.bins`.
 function NUM.bin(i,v,    b) --> atom
@@ -518,8 +564,8 @@ eg["--head"] = function(    t)
   print("head", #t.x, #t.y, t.klass.txt)
   assert(#t.x == 1 and #t.y == 2)              -- HpX summarized, skipped
   assert(t.klass.txt == "klass!" and t.cols[3].w == 0)
-  assert(getmetatable(t.cols[1]) == NUM)       -- A-Z: num; a-z: sym
-  assert(getmetatable(t.cols[4]) == SYM) end
+  assert(t.cols[1].it == NUM)              -- A-Z: num; a-z: sym
+  assert(t.cols[4].it == SYM) end
 
 eg["--clone"] = function(    t,u)
   t = Tab(the.file)
@@ -529,7 +575,7 @@ eg["--clone"] = function(    t,u)
   u = t:clone({t.rows[1]}, "bin")              -- bin makes all syms
   assert(table.concat(u.rows[1], ",") == "7,7,7,1,1,7,7,1")
   assert(u.names[1] == "clndrs")
-  assert(getmetatable(u.cols[2]) == SYM) end
+  assert(u.cols[2].it == SYM) end
 
 eg["--ydist"] = function(    t,d)
   t = Tab(the.file)
