@@ -225,6 +225,15 @@ function NUM.__sub(i,j,    n,d) --> NUM
                    mu = (i.n*i.mu - j.n*j.mu) / n,
                    m2 = max(0, i.m2 - j.m2 - d*d*i.n*j.n/n)}) end
 
+-- Return what is left of `i` once `j` is taken out of it.  Counts
+-- just subtract, where NUM has to read its pooling backwards.
+function SYM.__sub(i,j,    k,m) --> SYM
+  k = new(SYM, {txt=i.txt, at=i.at, w=i.w, n=i.n - j.n, has={}})
+  for v, n in pairs(i.has) do
+    m = n - (j.has[v] or 0)
+    if m > 0 then k.has[v] = m end end
+  return k end
+
 -- Return `i`'s standard deviation.
 function NUM.div(i) --> num
   return i.n < 2 and 0 or sqrt(max(i.m2, 0) / (i.n - 1)) end

@@ -23,24 +23,28 @@ flags:
 for k, v in usage:gmatch"\n%s+(%a+)=(%S+)" do the[k] = thing(v) end
 
 -- ---- growing ---------------------------------------------------------
--- Return a tree over `rows` of `tbl:TAB`, scored on `y`.
-function Tree(tbl,rows,y) --> NODE
+-- Return a tree over `rows` of `tbl:TAB`, scored on `y`.  `Y` is
+-- what collects those scores, and so what "least diversity" means:
+-- Num for a number, and its sd; Sym for a klass, and its entropy.
+function Tree(tbl,rows,y,Y) --> NODE
   return Node(tbl, rows or tbl.rows,
                    y or function(row) return tbl:ydist(row) end,
-                   1) end
+                   1, Y or Num) end
 
 -- Return one node over `rows`.  One pass scores every row, caching
 -- those scores for `cut`, and keeps two things from them: their mean,
 -- the guess for anything landing here, and the best row seen, the one
 -- worth labelling.  A sum, not a NUM, since nothing here asks for sd.
-function Node(tbl,rows,y,lvl,    i,v,pay,sum,cut,a,b,t) --> NODE
-  i   = new(NODE, {tbl = tbl, rows = rows, y = y, lvl = lvl, n = #rows,
-                   sub = tbl:clone(rows), ys = {}})
-  sum, pay = 0, Best(lt)
+function Node(tbl,rows,y,lvl,Y,    i,v,pay,all,cut,a,b,t,op) --> NODE
+  i   = new(NODE, {tbl = tbl, rows = rows, y = y, lvl = lvl, Y = Y,
+                   n = #rows, sub = tbl:clone(rows), ys = {}, txt = ""})
+  all, pay = Y(), Y == Num and Best(lt)  -- a klass has no best row
   for _, row in order(rows) do
-    v = y(row); i.ys[row] = v; sum = sum + v
-    pay:add(v, row) end
-  i.row, i.mu = pay.has, sum / i.n
+    v = y(row); i.ys[row] = v; all:add(v)
+    if pay then pay:add(v, row) end end
+  i.all = all
+  i.row = pay and pay.has
+  i.mu  = all.mu or best(all.has, same)   -- a mean, or a majority
   cut = i.n >= 2*the.leaf and lvl < the.depth and i:cut()
   if cut then
     a, b = {}, {}
@@ -49,7 +53,11 @@ function Node(tbl,rows,y,lvl,    i,v,pay,sum,cut,a,b,t) --> NODE
       t[#t + 1] = row end
     if #a >= the.leaf and #b >= the.leaf then   -- else, a bad cut
       i.at = cut
-      i.left, i.right = Node(tbl,a,y,lvl+1), Node(tbl,b,y,lvl+1) end end
+      i.left  = Node(tbl, a, y, lvl+1, Y)
+      i.right = Node(tbl, b, y, lvl+1, Y)
+      op = cut.col.it == SYM and {"==", "~="} or {"<=", ">"}
+      i.left.txt  = cut.col.txt.." "..op[1].." "..str(cut.bin)
+      i.right.txt = cut.col.txt.." "..op[2].." "..str(cut.bin) end end
   return i end
 
 -- Return the cut of `i.rows` -- a column, and a value where that
@@ -61,20 +69,20 @@ function NODE.cut(i,    out,xy,x,tot,d,b,lhs,val,big) --> dict
   function big(lo,n) return the.leaf <= lo and lo <= n - the.leaf end
   out = Best(lt)                     -- least diversity left behind
   for _, col in order(i.sub.x) do
-    xy, tot = {}, Num()            -- y is already paid for; one
+    xy, tot = {}, i.Y()            -- y is already paid for; one
     for _, row in order(i.rows) do -- pass fills xy and sums it
       x = row[col.at]
       if x ~= "?" then xy[#xy+1] = {x=x, y=tot:add(i.ys[row])} end end
     if col.it == SYM then
       d = {}
       for _, p in order(xy) do
-        b = d[p.x] or Num(); b:add(p.y); d[p.x] = b end
+        b = d[p.x] or i.Y(); b:add(p.y); d[p.x] = b end
       for v, lhs in pairs(d) do
         if big(lhs.n, #xy) then
           out:add(val(lhs, tot - lhs), {col = col, bin = v}) end end
     else
       sort(xy, "x")
-      lhs = Num()
+      lhs = i.Y()
       for j, p in order(xy) do
         lhs:add(p.y)
         if j < #xy and p.x ~= xy[j+1].x and big(j, #xy) then
@@ -87,8 +95,8 @@ function NODE.cut(i,    out,xy,x,tot,d,b,lhs,val,big) --> dict
 function NODE.pick(i,row,    c) --> NODE
   if not i.at then return i end
   c = i.at
-  return (c.col:holds(row[c.col.at], c.bin) and i.left
-          or i.right):pick(row) end
+  return (c.col:holds(row[c.col.at], c.bin) and i.left or i.right)
+         :pick(row) end
 
 -- Return one cell per y column -- `f(col)` -- padded to fit.
 function NODE.ycols(i,f,    t) --> str
@@ -97,33 +105,54 @@ function NODE.ycols(i,f,    t) --> str
     t[k] = ("%" .. max(10, #col.txt + 2) .. "s"):format(f(col)) end
   return table.concat(t) end
 
--- Call `f(node,s)` on `i` and everything below, pre-order; `s` is
--- the cut that got us to each node ("" at the root).
-function NODE.walk(i,f,s,    c,op) --> nil
-  f(i, s or "")
-  c = i.at
-  if c then
-    op = c.col.it == SYM and {"==", "~="} or {"<=", ">"}
-    i.left:walk(f, c.col.txt.." "..op[1].." "..str(c.bin))
-    i.right:walk(f, c.col.txt.." "..op[2].." "..str(c.bin)) end end
+-- Return an iterator over `i` and everything under it, pre-order.
+-- The stack is the recursion made explicit, which is what it costs
+-- to hand back one node at a time with no coroutine -- and what lets
+-- a caller `break`.  The right kid is pushed first, so the left pops
+-- first and the walk matches the descent.  One entry waits per level
+-- above, so `todo` never holds more than `the.depth` nodes.
+function NODE.walk(i,    todo) --> fun
+  todo = {i}
+  return function(    n)
+    n = table.remove(todo)
+    if not n then return end
+    if n.at then todo[#todo+1] = n.right; todo[#todo+1] = n.left end
+    return n end end
 
 -- Print `i`, one line per node, ticking the best leaf and crossing
 -- the worst (as utf8 bytes: lua 5.1 has no \u{} escape).
-function NODE.show(i,    t,ends,cell) --> nil
+function NODE.show(i,    t,ends,cell,n) --> nil
   cell = function(col)
     return col.it == NUM and str(col.mu) or best(col.has, same) end
   t, ends = {}, {}
-  i:walk(function(n) if not n.at then t[#t + 1] = n end end)
+  for n in i:walk() do
+    if not n.at then t[#t + 1] = n end end
   sort(t, "mu")
   ends[t[#t]] = " \226\156\151 "            -- cross the worst leaf,
   ends[t[1]]  = " \226\156\147 "            -- tick the best one
   print(("%-26s %5s %6s   %s"):format("", "n", "mu",
         i:ycols(function(col) return col.txt end)))
-  i:walk(function(n,s)
+  for n in i:walk() do
     print(("%-26s %5d %6s%s%s"):format(
-            ("|  "):rep(max(0, n.lvl - 2)) .. s,   -- root gets no bar
-            n.n, str(n.mu), ends[n] or "   ", n:ycols(cell))) end)
+            ("|  "):rep(max(0, n.lvl-2)) .. n.txt, -- root gets no bar
+            n.n, str(n.mu), ends[n] or "   ", n:ycols(cell))) end
   print"" end
+
+-- ---- predicting ------------------------------------------------------
+-- Return P(klass | `row`) off the leaf `row` lands in: the klass
+-- counts already sitting there, normalized.  The tree is the whole
+-- model; nothing is fitted inside the leaf.
+function NODE.posts(i,row,    n,t) --> dict
+  n, t = i:pick(row), {}
+  for k, m in pairs(n.all.has) do t[k] = m / n.all.n end
+  return t end
+
+-- Return the leaf's own naive Bayes, fitted the first time it is
+-- asked for and kept after.  A leaf is a region the tree thinks is
+-- uniform; this asks whether a second model still finds signal in it.
+function NODE.nb(i) --> NB
+  i.model = i.model or Nb(i.sub, i.rows)
+  return i.model end
 
 -- ---- start up --------------------------------------------------------
 -- Return `the.file` as train and test TABs, plus a `y` scored off
@@ -138,7 +167,7 @@ function eg.tree(    tr,te,y) --> nil
   tr, te, y = halves()
   Tree(tr, tr.rows, y):show() end
 
-function eg.all(    tr,te,y,i,lo,m1,m2,d,err) --> nil
+function eg.all(    tr,te,y,i,lo,m1,m2,d,err,n) --> nil
   tr, te, y = halves()
   i  = Tree(tr, tr.rows, y)
   assert(i.n == #tr.rows, "root holds every training row")
@@ -146,7 +175,7 @@ function eg.all(    tr,te,y,i,lo,m1,m2,d,err) --> nil
   for _, row in order(tr.rows) do          -- the payload is the best
     assert(y(row) >= lo - 1e-6, "payload is not the best row") end
   d = 0
-  i:walk(function(n) d = max(d, n.lvl) end)
+  for n in i:walk() do d = max(d, n.lvl) end
   assert(d <= the.depth, "tree grew past depth")
   for _, row in order(te.rows) do          -- every row reaches a
     assert(i:pick(row).row, "a row reached no payload") end -- leaf
