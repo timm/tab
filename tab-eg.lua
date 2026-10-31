@@ -60,6 +60,23 @@ function bayes(tr,te,    nb,col,bag,trb) -- learn tr, guess all of te
     bag:tally(row[col.at], nb:guess(row)) end
   return ("%.1f,%.1f,%.1f,%.3f"):format(bag:score()) end
 
+-- Return the macro mean of every klass's one-against-the-rest auc,
+-- and how many klasses that was.  A klass absent from this split has
+-- no auc to give, so it leaves the mean rather than scoring zero.
+function bayesAuc(tr,te,    trb,nb,col,rows,post,t,sum,k,a)
+  trb     = tr:clone(tr.rows, "bin")
+  nb, col = Nb(trb, trb.rows), trb.klass
+  rows, post = tr:clone(te.rows, "bin").rows, {}
+  for _, row in order(rows) do post[row] = nb:posts(row) end
+  sum, k = 0, 0
+  for x in pairs(nb.subs) do
+    t = {}
+    for _, row in order(rows) do
+      t[#t + 1] = {post[row][x] or 0, row[col.at] == x} end
+    a = auc(t)
+    if a then sum, k = sum + a, k + 1 end end
+  return ("%.4f,%d"):format(k > 0 and sum / k or 0, k) end
+
 -- Return a `fn` that scores one `row`.  For `moot/regression`, that is
 -- the one y column, in its own units.  Elsewhere it is `ydist`, where 0
 -- is heaven whatever `col.w` says, so `mae` compares across sets.
@@ -161,6 +178,9 @@ function eg.report()                -- what the cache says, so far
 
 function eg.nb()
   print(scored(the.file, "nb", bayes, "acc,pd,pf,d2h")) end
+
+function eg.nbauc()
+  print(scored(the.file, "nbauc", bayesAuc, "auc,klasses")) end
 
 function eg.rmeans()
   print(scored(the.file, "rmeans", rmeans, "rank,mae")) end

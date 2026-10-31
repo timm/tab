@@ -395,6 +395,20 @@ function NB.guess(i,row,    fn) --> atom
   fn = function(sub) return i:like(sub, row) end
   return (best(i.subs, fn)) end
 
+-- Return P(klass | `row`) for every klass.  `guess` keeps only the
+-- argmax; a ranking wants them all, on one scale across rows, so
+-- divide by their sum.  The biggest comes out before `exp`, since a
+-- log likelihood over many columns underflows.
+function NB.posts(i,row,    t,hi,z) --> dict
+  t, hi = {}, nil
+  for k, sub in pairs(i.subs) do
+    t[k] = i:like(sub, row)
+    if not hi or t[k] > hi then hi = t[k] end end
+  z = 0
+  for k, v in pairs(t) do t[k] = exp(v - hi); z = z + t[k] end
+  for k, v in pairs(t) do t[k] = v / z end
+  return t end
+
 -- ---- scoring ---------------------------------------------------------
 -- Return blank counts, for one test set.
 function Bag() --> BAG
@@ -429,6 +443,28 @@ function BAG.score(i,    k,pd,pf,d2h,r1,f1,d1) --> num
     r1, f1, d1 = i:score1(x)
     k, pd, pf, d2h = k + 1, pd + r1, pf + f1, d2h + d1 end
   return 100*i.ok/i.n, 100*pd/k, 100*pf/k, d2h/k, k end
+
+-- Return the area under the roc curve of `t`, a list of {score,
+-- want:bool}: the chance a random positive outscores a random
+-- negative.  Read off the rank sum, so one sort does it.  Ties share
+-- the mean of the places they cover, which is the .5 a coin would
+-- earn.  Nil when one side is missing, and there is nothing to
+-- measure.  Where pd and d2h score one threshold, this scores the
+-- whole ordering.
+function auc(t,    np,nn,j,k,r,tot) --> num
+  sort(t, 1)
+  np, nn, tot, j = 0, 0, 0, 1
+  for _, p in ipairs(t) do
+    if p[2] then np = np + 1 else nn = nn + 1 end end
+  if np == 0 or nn == 0 then return nil end
+  while j <= #t do
+    k = j
+    while k < #t and t[k + 1][1] == t[j][1] do k = k + 1 end
+    r = (j + k) / 2                      -- the mean place of a tie
+    for m = j, k do
+      if t[m][2] then tot = tot + r end end
+    j = k + 1 end
+  return (tot - np * (np + 1) / 2) / (np * nn) end
 
 -- ---- tests ------------------------------------------------------
 eg  = {}                           -- cli runs eg[action]; see --all
