@@ -58,33 +58,49 @@ flags:
 
 actions:
    -h              print help
-   --secs          time rmeans: train, then guess
-   --all           unit tests (--num, --split ... run just one)]]
+   --secs [reps]   time rmeans: train, then guess
+   --all           unit tests (--num, --split ... run just one)
+
+An action takes the words after it, and --all gives it none, so
+every argument of an action has a default.]]
 
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
+unpack = table.unpack or unpack    -- 5.4 moved it; luajit did not
 
-TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME = {},{},{},{},{},{},{},{}
+TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME,BEST = {},{},{},{},{},{},{},{},{}
 ```
 
 ## misc
 
-`new(meta, i) -> inst` Connect the instance `i` to its class `meta`.
+`new(meta, i) -> inst` Connect instance `i` to its class `meta`; `meta.it` names the
+class, so `col.it == SYM` asks what getmetatable() asked.
 
 ```lua
 function new(meta,i)
-  meta.__index = meta; return setmetatable(i, meta) end
+  meta.__index, meta.it = meta, meta; return setmetatable(i, meta) end
 ```
 
-`cli(k, v:atom) -> dict` Update `the` from the command line: a flag, an action, or a file.
+`cli() -> dict` Update `the` from the command line: a flag, an action, or a file.
+An action takes the words after it, up to the next flag, action
+or csv, so `--secs 10` times ten reps.  Under `--all` an action
+is called with none of them, so every argument wants a default.
 
 ```lua
-function cli(k,v)
-  for _, s in order(arg) do        -- name=value, action, file
+function cli(    j,s,k,v,rest)
+  j = 1
+  while arg[j] do
+    s, j = arg[j], j + 1           -- name=value, action, file
     k, v = s:match"^(%a%w*)=(.*)$"
-    if     k     then the[k] = thing(v)
-    elseif eg[s] then eg[s]()
-    else              the.file = s end end
+    if k then the[k] = thing(v)
+    elseif eg[s] then
+      rest = {}
+      while arg[j] and not eg[arg[j]]          -- not a flag, an
+            and not arg[j]:find"^%a%w*="       -- action, or a file
+            and not arg[j]:find"%.csv$" do
+        rest[#rest + 1] = thing(arg[j]); j = j + 1 end
+      eg[s](unpack(rest))
+    else the.file = s end end
   return the end
 ```
 
@@ -129,6 +145,25 @@ function best(t,fn,    n,m,u)
   return u, n end
 ```
 
+`Best(cmp) -> BEST` Return a BEST: the best thing shown to it so far (`has`) and its
+`score`; `cmp` says what best means, so `lt` keeps the smallest.
+
+```lua
+function Best(cmp)
+  return new(BEST, {cmp = cmp}) end
+```
+
+`.add(i:BEST, score, payload) -> any` Show `i` a `payload` scoring `score`; return what `i` holds now.
+Here is the best so far, here is one more thing: one compare, then
+maybe a swap.  Nothing rejected is kept, so nothing is scanned twice.
+
+```lua
+function BEST.add(i,score,payload)
+  if i.score == nil or i.cmp(score, i.score) then
+    i.score, i.has = score, payload end
+  return i.has end
+```
+
 `same(x:atom) -> any` Return `x`.
 
 ```lua
@@ -141,15 +176,23 @@ function same(x) return x end
 function lt(a,b) return a < b end
 ```
 
-`order(t:list, fn:fun) -> fun` Return `ipairs(t)`, or, given `fn`, that of a sorted copy.  `fn`
-is a comparator, or a cell index to sort rows on.
+`sort(t:list, fn:fun) -> list` Return `t`, sorted in place, ascending.  `fn` is a comparator; or
+a key -- a cell index, a field name -- to sort on; or nothing.
 
 ```lua
-function order(t,fn,    u,at)
-  if not fn then return ipairs(t) end -- copy's ipairs. fn: a comparator,
-  if type(fn) ~= "function" then     -- or a cell index to sort rows on
-    at = fn; fn = function(a,b) return a[at] < b[at] end end
-  u = map(t, same); table.sort(u, fn); return ipairs(u) end
+function sort(t,fn,    k)
+  if fn and type(fn) ~= "function" then
+    k = fn; fn = function(a,b) return a[k] < b[k] end end
+  table.sort(t, fn)
+  return t end
+```
+
+`order(t:list, fn:fun) -> fun` Return `ipairs(t)`, or, given `fn`, that of a sorted copy.
+
+```lua
+function order(t,fn)
+  if not fn then return ipairs(t) end
+  return ipairs(sort(map(t, same), fn)) end
 ```
 
 `str(x:atom) -> str` Return `x:atom` as text, with nums cut to `the.decs` decimals.
@@ -206,7 +249,7 @@ function csv(file,    rows,s)
 
 ```lua
 function Same(xs,ys,    fn)
-  fn = function(t,    u)     u=map(t, same); table.sort(u); return u end 
+  fn = function(t) return sort(map(t, same)) end
   return new(SAME, {xs = fn(xs), ys = fn(ys)}) end
 ```
 
@@ -281,31 +324,66 @@ function nums(lst,fn,    i)
   i=Num(); for _,x in order(lst) do i:add(fn(x)) end; return i end
 ```
 
-`.add(i:NUM, v:num)` Add `v:atom` to `i`, keeping Welford's running mean and sd.
+`.add(i:NUM, v:num, inc) -> atom` Add `v:atom` to `i`, returning `v`: Welford's running mean and
+sd.  `inc` of -1 takes `v` back out, so a scan can shift a row.
 
 ```lua
-function NUM.add(i,v,    d)
-  if v == "?" then return end
-  i.n = i.n + 1
-  d = v - i.mu
-  i.mu = i.mu + d / i.n
-  i.m2 = i.m2 + d * (v - i.mu) end
+function NUM.add(i,v,inc,    d)
+  if v == "?" then return v end
+  inc = inc or 1
+  i.n = i.n + inc
+  if i.n <= 0 then i.n, i.mu, i.m2 = 0, 0, 0; return v end
+  d    = v - i.mu
+  i.mu = i.mu + inc * d / i.n
+  i.m2 = i.m2 + inc * d * (v - i.mu)
+  return v end
 ```
 
-`.add(i:SYM, v:str)` Add one more `v:atom` to `i`'s counts.
+`.add(i:SYM, v:str, inc) -> atom` Add one more `v:atom` to `i`'s counts.  `inc` of -1 takes one away,
+and a count falling to zero leaves `has` outright: `div` sums over
+those keys, and log(0) is nothing to add up.
 
 ```lua
-function SYM.add(i,v)
-  if v == "?" then return end
-  i.n = i.n + 1
-  i.has[v] = (i.has[v] or 0) + 1 end
+function SYM.add(i,v,inc)
+  if v == "?" then return v end
+  inc = inc or 1
+  i.n = i.n + inc
+  i.has[v] = (i.has[v] or 0) + inc
+  if i.has[v] <= 0 then i.has[v] = nil end
+  return v end
+```
+
+`.__sub(i:NUM, j) -> NUM` Return what is left of `i` once `j` is taken out of it: the other
+side of a cut, in closed form.  Pooling says `i.m2` is its parts'
+m2 plus n1*n2/n times their gap squared, so read that backwards.
+
+```lua
+function NUM.__sub(i,j,    n,d)
+  n = i.n - j.n
+  if n < 1 then return Num(i.txt, i.at) end
+  d = j.mu - i.mu
+  return new(NUM, {txt = i.txt, at = i.at, w = i.w, n = n,
+                   mu = (i.n*i.mu - j.n*j.mu) / n,
+                   m2 = max(0, i.m2 - j.m2 - d*d*i.n*j.n/n)}) end
+```
+
+`.__sub(i:SYM, j) -> SYM` Return what is left of `i` once `j` is taken out of it.  Counts
+just subtract, where NUM has to read its pooling backwards.
+
+```lua
+function SYM.__sub(i,j,    k,m)
+  k = new(SYM, {txt=i.txt, at=i.at, w=i.w, n=i.n - j.n, has={}})
+  for v, n in pairs(i.has) do
+    m = n - (j.has[v] or 0)
+    if m > 0 then k.has[v] = m end end
+  return k end
 ```
 
 `.div(i:NUM) -> num` Return `i`'s standard deviation.
 
 ```lua
 function NUM.div(i)
-  return i.n < 2 and 0 or sqrt(i.m2 / (i.n - 1)) end
+  return i.n < 2 and 0 or sqrt(max(i.m2, 0) / (i.n - 1)) end
 ```
 
 `.div(i:SYM) -> num` Return `i`'s entropy.
@@ -330,6 +408,14 @@ function NUM.norm(i,v,    z)
 
 ```lua
 function SYM.norm(i,v) return v end
+```
+
+`.holds(i:SYM, x:str, v:str) -> bool` Return true when cell `x` is on `v`'s side of a cut.  An unknown
+says yes to everything, so a cut never loses a row.
+
+```lua
+function SYM.holds(i,x,v) return x == "?" or x == v end
+function NUM.holds(i,x,v) return x == "?" or x <= v end --> bool
 ```
 
 `.bin(i:NUM, v:num) -> atom` Return `v:atom`'s bin, 1..`the.bins`.
@@ -535,6 +621,23 @@ function NB.guess(i,row,    fn)
   return (best(i.subs, fn)) end
 ```
 
+`.posts(i:NB, row:row) -> dict` Return P(klass | `row`) for every klass.  `guess` keeps only the
+argmax; a ranking wants them all, on one scale across rows, so
+divide by their sum.  The biggest comes out before `exp`, since a
+log likelihood over many columns underflows.
+
+```lua
+function NB.posts(i,row,    t,hi,z)
+  t, hi = {}, nil
+  for k, sub in pairs(i.subs) do
+    t[k] = i:like(sub, row)
+    if not hi or t[k] > hi then hi = t[k] end end
+  z = 0
+  for k, v in pairs(t) do t[k] = exp(v - hi); z = z + t[k] end
+  for k, v in pairs(t) do t[k] = v / z end
+  return t end
+```
+
 ## scoring
 
 `Bag() -> BAG` Return blank counts, for one test set.
@@ -586,6 +689,31 @@ function BAG.score(i,    k,pd,pf,d2h,r1,f1,d1)
   return 100*i.ok/i.n, 100*pd/k, 100*pf/k, d2h/k, k end
 ```
 
+`auc(t:list) -> num` Return the area under the roc curve of `t`, a list of {score,
+want:bool}: the chance a random positive outscores a random
+negative.  Read off the rank sum, so one sort does it.  Ties share
+the mean of the places they cover, which is the .5 a coin would
+earn.  Nil when one side is missing, and there is nothing to
+measure.  Where pd and d2h score one threshold, this scores the
+whole ordering.
+
+```lua
+function auc(t,    np,nn,j,k,r,tot)
+  sort(t, 1)
+  np, nn, tot, j = 0, 0, 0, 1
+  for _, p in ipairs(t) do
+    if p[2] then np = np + 1 else nn = nn + 1 end end
+  if np == 0 or nn == 0 then return nil end
+  while j <= #t do
+    k = j
+    while k < #t and t[k + 1][1] == t[j][1] do k = k + 1 end
+    r = (j + k) / 2                      -- the mean place of a tie
+    for m = j, k do
+      if t[m][2] then tot = tot + r end end
+    j = k + 1 end
+  return (tot - np * (np + 1) / 2) / (np * nn) end
+```
+
 ## tests
 
 ```lua
@@ -603,10 +731,10 @@ eg["--all"] = function(    b4,keys) -- every test action, a-z order,
   for _, key in order(keys, lt) do the.seed = b4; eg[key]() end
   print("PASS " .. #keys .. " tests") end
 
-eg["--secs"] = function(  file,tbl,reps,tot,t0,tr,te,sub,y,model,lim,
-                          seed)
-  file = the.file                   -- time rmeans: train, then guess
-  tbl, reps, tot, seed = Tab(file), 3, 0, the.seed
+eg["--secs"] = function(reps, -- time rmeans: train, then guess
+                        file,tbl,tot,t0,tr,te,sub,y,model,lim,seed)
+  reps, file = reps or 3, the.file
+  tbl, tot, seed = Tab(file), 0, the.seed
   for s = 1, reps do
     the.seed = seed + s
     tr, te = tbl:split()
@@ -720,8 +848,8 @@ eg["--head"] = function(    t)
   print("head", #t.x, #t.y, t.klass.txt)
   assert(#t.x == 1 and #t.y == 2)              -- HpX summarized, skipped
   assert(t.klass.txt == "klass!" and t.cols[3].w == 0)
-  assert(getmetatable(t.cols[1]) == NUM)       -- A-Z: num; a-z: sym
-  assert(getmetatable(t.cols[4]) == SYM) end
+  assert(t.cols[1].it == NUM)              -- A-Z: num; a-z: sym
+  assert(t.cols[4].it == SYM) end
 
 eg["--clone"] = function(    t,u)
   t = Tab(the.file)
@@ -731,7 +859,7 @@ eg["--clone"] = function(    t,u)
   u = t:clone({t.rows[1]}, "bin")              -- bin makes all syms
   assert(table.concat(u.rows[1], ",") == "7,7,7,1,1,7,7,1")
   assert(u.names[1] == "clndrs")
-  assert(getmetatable(u.cols[2]) == SYM) end
+  assert(u.cols[2].it == SYM) end
 
 eg["--ydist"] = function(    t,d)
   t = Tab(the.file)

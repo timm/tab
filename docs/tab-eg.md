@@ -121,6 +121,26 @@ function bayes(tr,te,    nb,col,bag,trb)
   return ("%.1f,%.1f,%.1f,%.3f"):format(bag:score()) end
 ```
 
+Return the macro mean of every klass's one-against-the-rest auc,
+and how many klasses that was.  A klass absent from this split has
+no auc to give, so it leaves the mean rather than scoring zero.
+
+```lua
+function bayesAuc(tr,te,    trb,nb,col,rows,post,t,sum,k,a)
+  trb     = tr:clone(tr.rows, "bin")
+  nb, col = Nb(trb, trb.rows), trb.klass
+  rows, post = tr:clone(te.rows, "bin").rows, {}
+  for _, row in order(rows) do post[row] = nb:posts(row) end
+  sum, k = 0, 0
+  for x in pairs(nb.subs) do
+    t = {}
+    for _, row in order(rows) do
+      t[#t + 1] = {post[row][x] or 0, row[col.at] == x} end
+    a = auc(t)
+    if a then sum, k = sum + a, k + 1 end end
+  return ("%.4f,%d"):format(k > 0 and sum / k or 0, k) end
+```
+
 `goal(tbl:TAB) -> fn` Return a `fn` that scores one `row`.  For `moot/regression`, that is
 the one y column, in its own units.  Elsewhere it is `ydist`, where 0
 is heaven whatever `col.w` says, so `mae` compares across sets.
@@ -128,7 +148,7 @@ is heaven whatever `col.w` says, so `mae` compares across sets.
 ```lua
 function goal(tbl,    col)
   col = (the.file or ""):find"/regression/"
-        and #tbl.y == 1 and getmetatable(tbl.y[1]) == NUM and tbl.y[1]
+        and #tbl.y == 1 and tbl.y[1].it == NUM and tbl.y[1]
   if col then
     return function(row) return tonumber(row[col.at]) or col.mu end end
   return function(row) return tbl:ydist(row) end end
@@ -211,8 +231,7 @@ function dirs(kind,    out,h)
 function sorted(t,    u)
   u = {}
   for k in pairs(t) do u[#u + 1] = k end
-  table.sort(u)
-  return u end
+  return sort(u) end
 ```
 
 `readcol(dir, who, what)` one result column.
@@ -236,8 +255,7 @@ function readcol(dir,who,what,    f,out,at,n)
 
 ```lua
 function mid(xs,    ys)
-  ys = map(xs, same)
-  table.sort(ys)
+  ys = sort(map(xs, same))
   return #ys == 0 and 0 or (#ys % 2 == 1 and ys[(#ys+1)/2]
                             or (ys[#ys/2] + ys[#ys/2+1]) / 2) end
 
@@ -276,6 +294,9 @@ function eg.report()
 
 function eg.nb()
   print(scored(the.file, "nb", bayes, "acc,pd,pf,d2h")) end
+
+function eg.nbauc()
+  print(scored(the.file, "nbauc", bayesAuc, "auc,klasses")) end
 
 function eg.rmeans()
   print(scored(the.file, "rmeans", rmeans, "rank,mae")) end

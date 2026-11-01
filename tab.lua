@@ -22,11 +22,15 @@ flags:
 
 actions:
    -h              print help
-   --secs          time rmeans: train, then guess
-   --all           unit tests (--num, --split ... run just one)]]
+   --secs [reps]   time rmeans: train, then guess
+   --all           unit tests (--num, --split ... run just one)
+
+An action takes the words after it, and --all gives it none, so
+every argument of an action has a default.]]
 
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
+unpack = table.unpack or unpack    -- 5.4 moved it; luajit did not
 
 TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME,BEST = {},{},{},{},{},{},{},{},{}
 
@@ -37,12 +41,23 @@ function new(meta,i) --> inst
   meta.__index, meta.it = meta, meta; return setmetatable(i, meta) end
 
 -- Update `the` from the command line: a flag, an action, or a file.
-function cli(k,v) --> dict
-  for _, s in order(arg) do        -- name=value, action, file
+-- An action takes the words after it, up to the next flag, action
+-- or csv, so `--secs 10` times ten reps.  Under `--all` an action
+-- is called with none of them, so every argument wants a default.
+function cli(    j,s,k,v,rest) --> dict
+  j = 1
+  while arg[j] do
+    s, j = arg[j], j + 1           -- name=value, action, file
     k, v = s:match"^(%a%w*)=(.*)$"
-    if     k     then the[k] = thing(v)
-    elseif eg[s] then eg[s]()
-    else              the.file = s end end
+    if k then the[k] = thing(v)
+    elseif eg[s] then
+      rest = {}
+      while arg[j] and not eg[arg[j]]          -- not a flag, an
+            and not arg[j]:find"^%a%w*="       -- action, or a file
+            and not arg[j]:find"%.csv$" do
+        rest[#rest + 1] = thing(arg[j]); j = j + 1 end
+      eg[s](unpack(rest))
+    else the.file = s end end
   return the end
 
 -- Return an int in 1..`n`, repeatable from `the.seed`.
@@ -490,10 +505,10 @@ eg["--all"] = function(    b4,keys) -- every test action, a-z order,
   for _, key in order(keys, lt) do the.seed = b4; eg[key]() end
   print("PASS " .. #keys .. " tests") end
 
-eg["--secs"] = function(  file,tbl,reps,tot,t0,tr,te,sub,y,model,lim,
-                          seed)
-  file = the.file                   -- time rmeans: train, then guess
-  tbl, reps, tot, seed = Tab(file), 3, 0, the.seed
+eg["--secs"] = function(reps, -- time rmeans: train, then guess
+                        file,tbl,tot,t0,tr,te,sub,y,model,lim,seed)
+  reps, file = reps or 3, the.file
+  tbl, tot, seed = Tab(file), 0, the.seed
   for s = 1, reps do
     the.seed = seed + s
     tr, te = tbl:split()
