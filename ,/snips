@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# snips: every function of the lua files, each to its own file in
+# docs/snips/, for \lstinputlisting.  A function runs from its
+# "function X" line to the next blank line, so no markers are needed.
+# usage: ,/snips [outdir]
+Here="$(cd "$(dirname "$0")/.." && pwd)"
+Out="${1:-$Here/docs/snips}"
+mkdir -p "$Out"
+rm -f "$Out"/*.lua
+for f in "$Here"/*.lua; do
+  awk -v out="$Out" '
+    /^function [A-Za-z_][A-Za-z0-9_.]*[ (]/ {
+      name = $2; sub(/\(.*/, "", name)
+      file = out "/" name ".lua"; p = 1 }
+    p { if (/^ *$/) { close(file); p = 0 } else print > file }
+  ' "$f"
+done
+ls "$Out" | wc -l | xargs echo "snips:"

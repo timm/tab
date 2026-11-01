@@ -12,7 +12,7 @@ local tab = require "tab"
 if setfenv then setfenv(1, tab) end          -- tab's _ENV is ours too
 local _ENV = tab
 
-NODE = {}
+NODE, lab = {}, {}      -- lab[the.go]() runs at start up
 
 usage = [[
 flags:
@@ -20,32 +20,21 @@ flags:
   leaf=8           rows each side of a cut needs
   go=all           which action to run
 ]]
-for k, v in usage:gmatch"\n%s+(%a+)=(%S+)" do the[k] = thing(v) end
+for k, v in usage:gmatch"\n%s+(%a+)=(%S+)" do the[k] = values(v)[1] end
 
--- Return a collector of the least thing it is shown.  Call it with
--- a `score` and its `payload` to offer one, or with nothing to ask
--- what won; either way it answers payload, score.  One compare per
--- offer, and nothing rejected is kept, so nothing is scanned twice.
-function least(    it,b4) --> fun
+function least(    it,b4) --> fun; a collector of the least thing it is
   return function(score,payload)
     if score ~= nil and (b4 == nil or score < b4) then
       it, b4 = payload, score end
     return it, b4 end end
 
 -- ---- growing ---------------------------------------------------------
--- Return a tree over `rows` of `tbl:TAB`, scored on `y`.  `Y` is
--- what collects those scores, and so what "least diversity" means:
--- Num for a number, and its sd; Sym for a klass, and its entropy.
-function Tree(tbl,rows,y,Y) --> NODE
+function Tree(tbl,rows,y,Y) --> NODE; a tree over `rows` of `tbl:TAB`,
   return Node(tbl, rows or tbl.rows,
                    y or function(row) return tbl:ydist(row) end,
                    1, Y or Num) end
 
--- Return one node over `rows`.  One pass scores every row, caching
--- those scores for `cut`, and keeps two things from them: their mean,
--- the guess for anything landing here, and the best row seen, the one
--- worth labelling.  A sum, not a NUM, since nothing here asks for sd.
-function Node(tbl,rows,y,lvl,Y,    i,v,pay,all,cut,a,b,t,op) --> NODE
+function Node(tbl,rows,y,lvl,Y,    i,v,pay,all,cut,a,b,t,op) --> NODE; one
   i   = new(NODE, {tbl = tbl, rows = rows, y = y, lvl = lvl, Y = Y,
                    n = #rows, sub = tbl:clone(rows), ys = {}, txt = ""})
   all, pay = Y(), Y == Num and least()   -- a klass has no best row
@@ -70,11 +59,7 @@ function Node(tbl,rows,y,lvl,Y,    i,v,pay,all,cut,a,b,t,op) --> NODE
       i.right.txt = cut.col.txt.." "..op[2].." "..o(cut.bin) end end
   return i end
 
--- Return the cut of `i.rows` -- a column, and a value where that
--- column splits -- leaving the least y diversity behind: one cut per
--- SYM value; for NUMs, one between each distinct sorted neighbour,
--- with the right-hand summary always `tot` less the left.
-function NODE.cut(i,    out,xy,x,tot,d,b,lhs,val,big) --> dict
+function NODE.cut(i,    out,xy,x,tot,d,b,lhs,val,big) --> dict; cut of
   function val(a,b)  return (a:div()*a.n + b:div()*b.n) / (a.n+b.n) end
   function big(lo,n) return the.leaf <= lo and lo <= n - the.leaf end
   out = least()                      -- least diversity left behind
@@ -100,28 +85,19 @@ function NODE.cut(i,    out,xy,x,tot,d,b,lhs,val,big) --> dict
   return (out()) end
 
 -- ---- asking ----------------------------------------------------------
--- Return the leaf `row` falls into: its `mu` is the guess for
--- `row`, and its `row` the payload -- the best labelled row there.
-function NODE.pick(i,row,    c) --> NODE
+function NODE.pick(i,row,    c) --> NODE; leaf `row` falls into: its `mu`
   if not i.at then return i end
   c = i.at
   return (c.col:holds(row[c.col.at], c.bin) and i.left or i.right)
          :pick(row) end
 
--- Return one cell per y column -- `f(col)` -- padded to fit.
-function NODE.ycols(i,f,    t) --> str
+function NODE.ycols(i,f,    t) --> str; one cell per y column -- `f(col)`
   t = {}
   for k, col in order(i.sub.y) do
     t[k] = ("%" .. max(10, #col.txt + 2) .. "s"):format(f(col)) end
   return table.concat(t) end
 
--- Return an iterator over `i` and everything under it, pre-order.
--- The stack is the recursion made explicit, which is what it costs
--- to hand back one node at a time with no coroutine -- and what lets
--- a caller `break`.  The right kid is pushed first, so the left pops
--- first and the walk matches the descent.  One entry waits per level
--- above, so `todo` never holds more than `the.depth` nodes.
-function NODE.walk(i,    todo) --> fun
+function NODE.walk(i,    todo) --> fun; an iterator over `i` and everything
   todo = {i}
   return function(    n)
     n = table.remove(todo)
@@ -129,9 +105,7 @@ function NODE.walk(i,    todo) --> fun
     if n.at then todo[#todo+1] = n.right; todo[#todo+1] = n.left end
     return n end end
 
--- Print `i`, one line per node, ticking the best leaf and crossing
--- the worst (as utf8 bytes: lua 5.1 has no \u{} escape).
-function NODE.show(i,    t,ends,cell,n) --> nil
+function NODE.show(i,    t,ends,cell,n) --> nil; print `i`, one line per
   cell = function(col)
     return col.it == NUM and o(col.mu) or best(col.has, same) end
   t, ends = {}, {}
@@ -149,25 +123,17 @@ function NODE.show(i,    t,ends,cell,n) --> nil
   print"" end
 
 -- ---- predicting ------------------------------------------------------
--- Return P(klass | `row`) off the leaf `row` lands in: the klass
--- counts already sitting there, normalized.  The tree is the whole
--- model; nothing is fitted inside the leaf.
-function NODE.posts(i,row,    n,t) --> dict
+function NODE.posts(i,row,    n,t) --> dict; p(klass | `row`) off the leaf
   n, t = i:pick(row), {}
   for k, m in pairs(n.all.has) do t[k] = m / n.all.n end
   return t end
 
--- Return the leaf's own naive Bayes, fitted the first time it is
--- asked for and kept after.  A leaf is a region the tree thinks is
--- uniform; this asks whether a second model still finds signal in it.
-function NODE.nb(i) --> NB
+function NODE.nb(i) --> NB; leaf's own naive Bayes, fitted the first time
   i.model = i.model or Nb(i.sub, i.rows)
   return i.model end
 
 -- ---- start up --------------------------------------------------------
--- Return `the.file` as train and test TABs, plus a `y` scored off
--- the train table alone (all a learner is allowed to see).
-function halves(    tbl,tr,te) --> TAB
+function halves(    tbl,tr,te) --> TAB; `the.file` as train and test TABs,
   tbl    = Tab(the.file)
   tr, te = tbl:split()
   tr, te = tbl:clone(tr), tbl:clone(te)

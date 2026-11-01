@@ -9,9 +9,9 @@
 --        luajit tab-eg.lua go=rmeans file=f.csv
 --        luajit tab-eg.lua go=splits file=f.csv  (what seed s gives)
 package.path = (arg[0]:match"^(.*)/" or ".") .. "/?.lua;" .. package.path
-local min = require "tab"
-if setfenv then setfenv(1, min) end          -- tab's _ENV is ours too
-local _ENV = min
+local tab = require "tab"
+if setfenv then setfenv(1, tab) end          -- tab's _ENV is ours too
+local _ENV = tab
 cache = os.getenv"CACHE"           -- ../tab-dev/cache, if ,/sh
 if not cache or cache == "" then   -- "" is true in lua, so an
   cache = (os.getenv"HOME" or "~") .. "/tmp/cache" end -- empty
@@ -50,6 +50,79 @@ function scored(file,who,fun,what,    dir,f,h,tbl,t0,line,ok) -- once
   h:close()
   return f end
 
+-- ---- scoring ---------------------------------------------------------
+function Bag() --> BAG; blank counts, for one test set.
+  return new(BAG, {n = 0, ok = 0, got = {}, want = {}, hit = {}}) end
+
+function BAG.tally(i,want,got) --> nil; add one guess to `i`: `want:value`
+  i.n          = i.n + 1
+  i.ok         = i.ok + (want == got and 1 or 0)
+  i.want[want] = (i.want[want] or 0) + 1
+  i.got[got]   = (i.got[got] or 0) + 1
+  if want == got then i.hit[got] = (i.hit[got] or 0) + 1 end end
+
+function BAG.parts(i,x,    tp,fp,fn) --> int; klass `x:value`'s tp, fp, fn
+  tp = i.hit[x] or 0
+  fp = (i.got[x] or 0) - tp
+  fn = (i.want[x] or 0) - tp
+  return tp, fp, fn, i.n - fn - fp - tp end
+
+function BAG.score1(i,x,    tp,fp,fn,tn,r1,f1) --> num; klass `x:value`'s
+  tp, fp, fn, tn = i:parts(x)
+  r1 = tp / (tp + fn)
+  f1 = fp + tn > 0 and fp / (fp + tn) or 0
+  return r1, f1, sqrt((1 - r1) ^ 2 + f1 ^ 2) / sqrt(2) end
+
+function BAG.score(i,    k,pd,pf,d2h,r1,f1,d1) --> num; `i`'s macro acc
+  k, pd, pf, d2h = 0, 0, 0, 0
+  for x in pairs(i.want) do
+    r1, f1, d1 = i:score1(x)
+    k, pd, pf, d2h = k + 1, pd + r1, pf + f1, d2h + d1 end
+  return 100*i.ok/i.n, 100*pd/k, 100*pf/k, d2h/k, k end
+
+function auc(t,    ps,ns,u,j,k,tot) --> num; chance a random positive
+  ps, ns = {}, {}                 -- outscores a random negative, given
+  for _, p in order(t) do         -- `t`, a list of {score, want:bool}
+    u = p[2] and ps or ns; u[#u + 1] = p[1] end
+  if #ps == 0 or #ns == 0 then return nil end
+  sort(ps); sort(ns)
+  j, k, tot = 0, 0, 0             -- cliffs' walk: for each positive,
+  for _, x in order(ps) do        -- negatives below, half the ties
+    while j < #ns and ns[j+1] <  x do j = j + 1; k = j end
+    while k < #ns and ns[k+1] == x do k = k + 1 end
+    tot = tot + j + (k - j) / 2 end
+  return tot / (#ps * #ns) end
+
+-- ---- stats -----------------------------------------------------------
+function Same(xs,ys) --> SAME; sorted copies of two samples, ready
+  return new(SAME, {xs = sort(map(xs, same)),  -- to compare
+                    ys = sort(map(ys, same))}) end
+
+function SAME.ok(i) --> bool; true if all stats pass
+  return i:cohen() <= .35 and i:cliffs() <= .195 and i:ks() <= 1.36 end
+
+function SAME.cohen(i,  a,b,sd) --> num; pooled sds.
+  a, b = nums(i.xs), nums(i.ys)
+  sd = sqrt(((a.n-1) * a:div()^2 + (b.n-1) * b:div()^2) / (a.n+b.n-2))
+  return abs(a.mu - b.mu) / (sd + 1e-32) end
+
+function SAME.cliffs(i,    xs,ys,gt,lt,j,k) --> num; how often `i.xs` is in
+  xs, ys, gt, lt, j, k = i.xs, i.ys, 0, 0, 0, 0
+  for _, x in order(xs) do
+    while j < #ys and ys[j+1] <  x do j = j + 1; k = j end
+    while k < #ys and ys[k+1] == x do k = k + 1 end
+    gt, lt = gt + j, lt + #ys - k end
+  return abs(gt - lt) / (#xs * #ys) end
+
+function SAME.ks(i,    xs,ys,p,q,d,v) --> num; widest gap of two cdfs
+  xs, ys, p, q, d = i.xs, i.ys, 0, 0, 0
+  while p < #xs and q < #ys do
+    v = min(xs[p+1], ys[q+1])
+    while p < #xs and xs[p+1] == v do p = p + 1 end
+    while q < #ys and ys[q+1] == v do q = q + 1 end
+    d = max(d, abs(p/#xs - q/#ys)) end
+  return d / sqrt((#xs + #ys) / (#xs * #ys)) end
+
 -- ---- learners --------------------------------------------------------
 function bayes(tr,te,    nb,col,bag,trb) -- learn tr, guess all of te
   trb, bag = tr:clone(tr.rows, "bin"), Bag()
@@ -58,10 +131,7 @@ function bayes(tr,te,    nb,col,bag,trb) -- learn tr, guess all of te
     bag:tally(row[col.at], nb:guess(row)) end
   return ("%.1f,%.1f,%.1f,%.3f"):format(bag:score()) end
 
--- Return the macro mean of every klass's one-against-the-rest auc,
--- and how many klasses that was.  A klass absent from this split has
--- no auc to give, so it leaves the mean rather than scoring zero.
-function bayesAuc(tr,te,    trb,nb,col,rows,post,t,sum,k,a)
+function bayesAuc(tr,te,    trb,nb,col,rows,post,t,sum,k,a) -- macro mean
   trb     = tr:clone(tr.rows, "bin")
   nb, col = Nb(trb, trb.rows), trb.klass
   rows, post = tr:clone(te.rows, "bin").rows, {}
@@ -75,10 +145,7 @@ function bayesAuc(tr,te,    trb,nb,col,rows,post,t,sum,k,a)
     if a then sum, k = sum + a, k + 1 end end
   return ("%.4f,%d"):format(k > 0 and sum / k or 0, k) end
 
--- Return a `fn` that scores one `row`.  For `moot/regression`, that is
--- the one y column, in its own units.  Elsewhere it is `ydist`, where 0
--- is heaven whatever `col.w` says, so `mae` compares across sets.
-function goal(tbl,    col) --> fn
+function goal(tbl,    col) --> fn; a `fn` that scores one `row`.  For
   col = (the.file or ""):find"/regression/"
         and #tbl.y == 1 and tbl.y[1].it == NUM and tbl.y[1]
   if col then
@@ -163,33 +230,33 @@ function versus(kind,who1,who2,what,big,    w,t,l,ma,mb,xs,ys)
         :format(kind, who1, mid(ma), who2, mid(mb), w, t, l)) end
 
 -- ---- start up --------------------------------------------------------
-function lab.splits(    tbl,tr,te)   -- what seed s gives
+function slow.splits(    tbl,tr,te)   -- what seed s gives
   tbl = Tab(the.file)
   tr, te = pair(tbl, tonumber(the.rep) or 1)
   print(#tr.rows, #te.rows, table.concat(tr.rows[1], ",")) end
 
-function lab.report()                -- what the cache says
+function slow.report()                -- what the cache says
   versus("classify",   "nb",     "lgbm",      "acc",  true)
   versus("regression", "rmeans", "lgbm",      "mae",  false)
   versus("regression", "rmeans", "rmeansall", "rank", false)
   versus("optimize",   "rmeans", "rmeansall", "rank", false) end
 
-function lab.nb()
+function slow.nb()
   print(scored(the.file, "nb", bayes, "acc,pd,pf,d2h")) end
 
-function lab.nbauc()
+function slow.nbauc()
   print(scored(the.file, "nbauc", bayesAuc, "auc,klasses")) end
 
-function lab.rmeans()
+function slow.rmeans()
   print(scored(the.file, "rmeans", rmeans, "rank,mae")) end
 
-function lab.rmeansall()
+function slow.rmeansall()
   print(scored(the.file, "rmeansall", rmeansall, "rank,mae")) end
 
 the = cli()                 -- read late, so that a bare `rmeans` is
-                            -- an action of lab, and not a file name
+                            -- an action of slow, and not a file name
 if (arg and arg[0] or ""):find"tab%-eg%.lua$" and the.go then
-  fun = lab[the.go] or eg[the.go]   -- a broken csv is a skip, not a
+  fun = slow[the.go] or fast[the.go]   -- a broken csv is a skip, not a
   if not fun then                   -- stop; an unknown go says so
     io.stderr:write("tab-eg.lua: no such go: ", the.go, "\n")
   else
