@@ -73,13 +73,14 @@ function arm(who,how,score,what)    -- one cached run of one arm
                  function(tr,te) return score(tr, te, how) end,
                  what)) end end
 
-eg.treemaj    = arm("treemaj",    majGuess, treeScore, "acc,pd,pf,d2h")
-eg.treenb     = arm("treenb",     nbGuess,  treeScore, "acc,pd,pf,d2h")
-eg.treemajauc = arm("treemajauc", majPosts, treeAuc,   "auc,klasses")
-eg.treenbauc  = arm("treenbauc",  nbPosts,  treeAuc,   "auc,klasses")
+lab.treemaj    = arm("treemaj",    majGuess, treeScore, "acc,pd,pf,d2h")
+lab.treenb     = arm("treenb",     nbGuess,  treeScore, "acc,pd,pf,d2h")
+lab.treemajauc = arm("treemajauc", majPosts, treeAuc,   "auc,klasses")
+lab.treenbauc  = arm("treenbauc",  nbPosts,  treeAuc,   "auc,klasses")
 
 if (arg and arg[0] or ""):find"tree%-eg%.lua$" then
-  ok, err = pcall(eg[the.go] or function() error("no go="..tostring(the.go)) end)
+  ok, err = pcall(lab[the.go] or eg[the.go]
+                  or function() error("no go=" .. tostring(the.go)) end)
   if not ok then
     io.stderr:write(the.file, ": ", tostring(err), "\n") end end
 return _ENV

@@ -12,8 +12,6 @@ package.path = (arg[0]:match"^(.*)/" or ".") .. "/?.lua;" .. package.path
 local min = require "tab"
 if setfenv then setfenv(1, min) end          -- tab's _ENV is ours too
 local _ENV = min
-the = cli()                         -- tab's options, off our cli
-
 cache = os.getenv"CACHE"           -- ../tab-dev/cache, if ,/sh
 if not cache or cache == "" then   -- "" is true in lua, so an
   cache = (os.getenv"HOME" or "~") .. "/tmp/cache" end -- empty
@@ -165,31 +163,37 @@ function versus(kind,who1,who2,what,big,    w,t,l,ma,mb,xs,ys)
         :format(kind, who1, mid(ma), who2, mid(mb), w, t, l)) end
 
 -- ---- start up --------------------------------------------------------
-function eg.splits(    tbl,tr,te)  -- what seed s gives, for checking
+function lab.splits(    tbl,tr,te)   -- what seed s gives
   tbl = Tab(the.file)
   tr, te = pair(tbl, tonumber(the.rep) or 1)
   print(#tr.rows, #te.rows, table.concat(tr.rows[1], ",")) end
 
-function eg.report()                -- what the cache says, so far
+function lab.report()                -- what the cache says
   versus("classify",   "nb",     "lgbm",      "acc",  true)
   versus("regression", "rmeans", "lgbm",      "mae",  false)
   versus("regression", "rmeans", "rmeansall", "rank", false)
   versus("optimize",   "rmeans", "rmeansall", "rank", false) end
 
-function eg.nb()
+function lab.nb()
   print(scored(the.file, "nb", bayes, "acc,pd,pf,d2h")) end
 
-function eg.nbauc()
+function lab.nbauc()
   print(scored(the.file, "nbauc", bayesAuc, "auc,klasses")) end
 
-function eg.rmeans()
+function lab.rmeans()
   print(scored(the.file, "rmeans", rmeans, "rank,mae")) end
 
-function eg.rmeansall()
+function lab.rmeansall()
   print(scored(the.file, "rmeansall", rmeansall, "rank,mae")) end
 
-if (arg and arg[0] or ""):find"tab%-eg%.lua$" then
-  ok, err = pcall(eg[the.go])       -- a broken csv is a skip, not a stop
-  if not ok then
-    io.stderr:write(the.file, ": ", tostring(err), "\n") end end
+the = cli()                 -- read late, so that a bare `rmeans` is
+                            -- an action of lab, and not a file name
+if (arg and arg[0] or ""):find"tab%-eg%.lua$" and the.go then
+  fun = lab[the.go] or eg[the.go]   -- a broken csv is a skip, not a
+  if not fun then                   -- stop; an unknown go says so
+    io.stderr:write("tab-eg.lua: no such go: ", the.go, "\n")
+  else
+    ok, err = pcall(fun)
+    if not ok then
+      io.stderr:write(the.file, ": ", tostring(err), "\n") end end end
 return _ENV

@@ -28,10 +28,10 @@ Png   = str(Runs.parent / "plot.png")
 
 # the flags of tab.lua's help, and tab-eg.lua's force
 Flags = [("go",     "rmeans"), ("bins",  "7"), ("budget", "50"),
-         ("check",  "5"), ("decs", "2"), ("m", "2"), ("p", "2"),
+         ("check",  "5"), ("fmt", "%.2f"), ("m", "2"), ("p", "2"),
          ("seed",   "1234567891"), ("force", ""),
-         ("file",   "~/gits/moot/optimize/misc/auto93.csv"),
-         ("args",   "")]                 # the words an action takes
+         ("reps",   "3"),
+         ("file",   "~/gits/moot/optimize/misc/auto93.csv")]
 
 # tab-eg.lua's rigs, then tab.lua's own actions
 Goes = ["rmeans", "rmeansall", "nb", "nbauc", "splits", "report",
@@ -49,14 +49,13 @@ def config(args=(), base=None):
 def command(cfg):
   "The argv a config means: an action of tab.lua, else a rig."
   go   = cfg.get("go", "rmeans")
-  more = str(cfg.get("args", "")).split()      # only an action takes
-  args = [f"{k}={v}" for k, v in cfg.items()   # words of its own
-          if k not in ("go", "args") and str(v).strip() != ""]
+  args = [f"{k}={v}" for k, v in cfg.items()
+          if k != "go" and str(v).strip() != ""]
   if go.startswith("-"):
-    return ["lua", "tab.lua", *args, go, *more]
+    return ["lua", "tab.lua", *args, go]
   return ["luajit", "tab-eg.lua", *args, f"go={go}"]
 
-def summary(cfg, skip=("go", "args")):
+def summary(cfg, skip=("go",)):
   "The config on one line, a long file name cut to its name."
   return " ".join(f"{k}={Path(v).name if k == 'file' else v}"
                   for k, v in cfg.items()

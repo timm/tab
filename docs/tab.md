@@ -48,27 +48,27 @@ usage: lua tab.lua [name=value | action | file.csv ...]
 
 flags:
   bins=7           numeric columns get this many bins
+  budge=50         an eg over this many ms belongs in lab
   budget=50        labels, all in
   check=5          of those, saved for the test rows
-  decs=2           decimals, when a number is printed
+  fmt=%.2f         how a fraction is printed
   m=2              m-estimate: prior weight for a thin bin
   p=2              minkowski coefficient
+  reps=3           repeats, when something is timed
   seed=1234567891  random number seed
   file=~/gits/moot/optimize/misc/auto93.csv
 
 actions:
    -h              print help
-   --secs [reps]   time rmeans: train, then guess
-   --all           unit tests (--num, --split ... run just one)
+   --all           every fast action (--num, --split ... run one)
+   --secs          slow: time rmeans, over `reps` repeats
 
-An action takes the words after it, and --all gives it none, so
-every argument of an action has a default.]]
+Any flag above can lead an action, so `reps=9 --secs` times nine.]]
 
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
-unpack = table.unpack or unpack    -- 5.4 moved it; luajit did not
 
-TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME,BEST = {},{},{},{},{},{},{},{},{}
+TAB,NUM,SYM,BINS,RMEANS,NB,BAG,SAME = {},{},{},{},{},{},{},{}
 ```
 
 ## misc
@@ -78,29 +78,19 @@ class, so `col.it == SYM` asks what getmetatable() asked.
 
 ```lua
 function new(meta,i)
-  meta.__index, meta.it = meta, meta; return setmetatable(i, meta) end
+  meta.__index, meta.it, meta.__tostring = meta, meta, o
+  return setmetatable(i, meta) end
 ```
 
 `cli() -> dict` Update `the` from the command line: a flag, an action, or a file.
-An action takes the words after it, up to the next flag, action
-or csv, so `--secs 10` times ten reps.  Under `--all` an action
-is called with none of them, so every argument wants a default.
 
 ```lua
-function cli(    j,s,k,v,rest)
-  j = 1
-  while arg[j] do
-    s, j = arg[j], j + 1           -- name=value, action, file
+function cli(    k,v)
+  for _, s in order(arg) do        -- name=value, action, file
     k, v = s:match"^(%a%w*)=(.*)$"
-    if k then the[k] = thing(v)
-    elseif eg[s] then
-      rest = {}
-      while arg[j] and not eg[arg[j]]          -- not a flag, an
-            and not arg[j]:find"^%a%w*="       -- action, or a file
-            and not arg[j]:find"%.csv$" do
-        rest[#rest + 1] = thing(arg[j]); j = j + 1 end
-      eg[s](unpack(rest))
-    else the.file = s end end
+    if     k               then the[k] = thing(v)
+    elseif eg[s] or lab[s] then (eg[s] or lab[s])()
+    else                       the.file = s end end
   return the end
 ```
 
@@ -145,25 +135,6 @@ function best(t,fn,    n,m,u)
   return u, n end
 ```
 
-`Best(cmp) -> BEST` Return a BEST: the best thing shown to it so far (`has`) and its
-`score`; `cmp` says what best means, so `lt` keeps the smallest.
-
-```lua
-function Best(cmp)
-  return new(BEST, {cmp = cmp}) end
-```
-
-`.add(i:BEST, score, payload) -> any` Show `i` a `payload` scoring `score`; return what `i` holds now.
-Here is the best so far, here is one more thing: one compare, then
-maybe a swap.  Nothing rejected is kept, so nothing is scanned twice.
-
-```lua
-function BEST.add(i,score,payload)
-  if i.score == nil or i.cmp(score, i.score) then
-    i.score, i.has = score, payload end
-  return i.has end
-```
-
 `same(x:atom) -> any` Return `x`.
 
 ```lua
@@ -195,23 +166,32 @@ function order(t,fn)
   return ipairs(sort(map(t, same), fn)) end
 ```
 
-`str(x:atom) -> str` Return `x:atom` as text, with nums cut to `the.decs` decimals.
-Whole numbers stay whole, so a count of 318 is not "318.00".
+`o(x:atom) -> str` Return `x` as text: a fraction through `the.fmt`, a list in
+order, anything else by sorted key.  Whole numbers stay whole, so
+a count of 318 is not "318.00".  Functions and the `it` back
+pointer stay out, so an instance shows its own data, not its class.
 
 ```lua
-function str(x)
-  return type(x) == "number" and x ~= floor(x)
-         and ("%." .. the.decs .. "f"):format(x) or tostring(x) end
+function o(x,    u)
+  if type(x) ~= "table" then              
+    if type(x) ~= "number" then return tostring(x) end   
+    return tostring(x == floor(x) and floor(x) or the.fmt:format(x)) end
+  u = {}
+  if #x>0 then for _, v in ipairs(x) do u[#u+1] = o(v) end
+          else for k, v in pairs(x) do
+                 if k ~= "it" and type(v) ~= "function" then
+                   u[#u + 1] = o(k) .. "=" .. o(v) end end end
+  return "{"..table.concat(#x > 0 and u or sort(u, lt)," ").."}" end
 ```
 
-`print(...)` Print the lot, tab separated, every number through `str`.  This
+`print(...)` Print the lot, tab separated, everything through `o`.  This
 shadows lua's own print for everything sharing this `_ENV`, so
-`decs=4` widens every number anything here ever prints.
+`fmt=%.4f` widens every number anything here ever prints.
 
 ```lua
 function print(...)
   local out = {}
-  for j = 1, select("#", ...) do out[j] = str((select(j, ...))) end
+  for j = 1, select("#", ...) do out[j] = o((select(j, ...))) end
   io.write(table.concat(out, "\t"), "\n") end
 ```
 
@@ -717,23 +697,30 @@ function auc(t,    np,nn,j,k,r,tot)
 ## tests
 
 ```lua
-eg  = {}                           -- cli runs eg[action]; see --all
+eg  = {}                     -- fast: every one runs under --all
+lab = {}                     -- slow: these run only when named
 -- Return true when `a:num` and `b:num` are close enough.
 function near(a,b) return abs(a - b) < 1e-6 end --> bool
 
 eg["-h"] = function() print(help) end
 
-eg["--all"] = function(    b4,keys) -- every test action, a-z order,
-  b4, keys = the.seed, {}           -- each from a fresh seed
-  for key in pairs(eg) do           -- skip the non-test actions:
-    if not (" -h --secs --all "):find(" "..key.." ", 1, true) then
-      keys[#keys + 1] = key end end
-  for _, key in order(keys, lt) do the.seed = b4; eg[key]() end
-  print("PASS " .. #keys .. " tests") end
+eg["--all"] = function(    b4,keys,t0,ms,worst,slow)
+  b4, keys, worst = the.seed, {}, 0 -- every test action, a-z order,
+  for key in pairs(eg) do           -- each from a fresh seed; skip
+    if not (" -h --all "):find(" " .. key .. " ", 1, true) then
+      keys[#keys + 1] = key end end            -- the non-tests
+  for _, key in order(keys, lt) do
+    the.seed, t0 = b4, os.clock()
+    eg[key]()                       -- an eg is small by definition,
+    ms = 1000 * (os.clock() - t0)   -- so time it and say who is not
+    if ms > worst then worst, slow = ms, key end end
+  print(("PASS %d tests, worst %s at %.1fms")
+        :format(#keys, slow, worst))
+  assert(worst < the.budge, slow .. " is no eg: move it to lab") end
 
-eg["--secs"] = function(reps, -- time rmeans: train, then guess
-                        file,tbl,tot,t0,tr,te,sub,y,model,lim,seed)
-  reps, file = reps or 3, the.file
+lab["--secs"] = function(    reps,file,tbl,tot,t0,tr,te,sub,y,
+                             model,lim,seed)
+  reps, file = the.reps, the.file  -- time rmeans: train, then guess
   tbl, tot, seed = Tab(file), 0, the.seed
   for s = 1, reps do
     the.seed = seed + s
@@ -752,6 +739,17 @@ eg["--secs"] = function(reps, -- time rmeans: train, then guess
   print(string.format("%s rows=%6d secs=%.4f",
                       file:match"([^/]+)%.csv$", #tbl.rows,
                       tot / reps)) end
+
+eg["--o"] = function(    i,b4)   -- nested, in order, at the.fmt
+  i, b4 = Num(), the.fmt
+  i:add(1); i:add(2); the.fmt = "%.2f"
+  print("o", o{1, 2.5, {a = 1, b = {2, 3}}}, i)
+  assert(o{1, 2.5} == "{1 2.50}")   -- a fraction gets the.fmt
+  assert(o{b = 1, a = 2} == "{a=2 b=1}")
+  assert(o{a = {1, {z = 3}}} == "{a={1 {z=3}}}")
+  assert(tostring(i):find"n=2" and not tostring(i):find"it=")
+  the.fmt = "%.3f"; assert(o{x = 1/3} == "{x=0.333}")
+  the.fmt = b4 end                  -- leave fmt as we found it
 
 eg["--thing"] = function()
   print("thing", thing" 42 ", thing"x", thing"4.2")

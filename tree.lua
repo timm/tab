@@ -22,6 +22,16 @@ flags:
 ]]
 for k, v in usage:gmatch"\n%s+(%a+)=(%S+)" do the[k] = thing(v) end
 
+-- Return a collector of the least thing it is shown.  Call it with
+-- a `score` and its `payload` to offer one, or with nothing to ask
+-- what won; either way it answers payload, score.  One compare per
+-- offer, and nothing rejected is kept, so nothing is scanned twice.
+function least(    it,b4) --> fun
+  return function(score,payload)
+    if score ~= nil and (b4 == nil or score < b4) then
+      it, b4 = payload, score end
+    return it, b4 end end
+
 -- ---- growing ---------------------------------------------------------
 -- Return a tree over `rows` of `tbl:TAB`, scored on `y`.  `Y` is
 -- what collects those scores, and so what "least diversity" means:
@@ -38,12 +48,12 @@ function Tree(tbl,rows,y,Y) --> NODE
 function Node(tbl,rows,y,lvl,Y,    i,v,pay,all,cut,a,b,t,op) --> NODE
   i   = new(NODE, {tbl = tbl, rows = rows, y = y, lvl = lvl, Y = Y,
                    n = #rows, sub = tbl:clone(rows), ys = {}, txt = ""})
-  all, pay = Y(), Y == Num and Best(lt)  -- a klass has no best row
+  all, pay = Y(), Y == Num and least()   -- a klass has no best row
   for _, row in order(rows) do
     v = y(row); i.ys[row] = v; all:add(v)
-    if pay then pay:add(v, row) end end
+    if pay then pay(v, row) end end
   i.all = all
-  i.row = pay and pay.has
+  i.row = pay and pay()
   i.mu  = all.mu or best(all.has, same)   -- a mean, or a majority
   cut = i.n >= 2*the.leaf and lvl < the.depth and i:cut()
   if cut then
@@ -56,8 +66,8 @@ function Node(tbl,rows,y,lvl,Y,    i,v,pay,all,cut,a,b,t,op) --> NODE
       i.left  = Node(tbl, a, y, lvl+1, Y)
       i.right = Node(tbl, b, y, lvl+1, Y)
       op = cut.col.it == SYM and {"==", "~="} or {"<=", ">"}
-      i.left.txt  = cut.col.txt.." "..op[1].." "..str(cut.bin)
-      i.right.txt = cut.col.txt.." "..op[2].." "..str(cut.bin) end end
+      i.left.txt  = cut.col.txt.." "..op[1].." "..o(cut.bin)
+      i.right.txt = cut.col.txt.." "..op[2].." "..o(cut.bin) end end
   return i end
 
 -- Return the cut of `i.rows` -- a column, and a value where that
@@ -67,7 +77,7 @@ function Node(tbl,rows,y,lvl,Y,    i,v,pay,all,cut,a,b,t,op) --> NODE
 function NODE.cut(i,    out,xy,x,tot,d,b,lhs,val,big) --> dict
   function val(a,b)  return (a:div()*a.n + b:div()*b.n) / (a.n+b.n) end
   function big(lo,n) return the.leaf <= lo and lo <= n - the.leaf end
-  out = Best(lt)                     -- least diversity left behind
+  out = least()                      -- least diversity left behind
   for _, col in order(i.sub.x) do
     xy, tot = {}, i.Y()            -- y is already paid for; one
     for _, row in order(i.rows) do -- pass fills xy and sums it
@@ -79,15 +89,15 @@ function NODE.cut(i,    out,xy,x,tot,d,b,lhs,val,big) --> dict
         b = d[p.x] or i.Y(); b:add(p.y); d[p.x] = b end
       for v, lhs in pairs(d) do
         if big(lhs.n, #xy) then
-          out:add(val(lhs, tot - lhs), {col = col, bin = v}) end end
+          out(val(lhs, tot - lhs), {col = col, bin = v}) end end
     else
       sort(xy, "x")
       lhs = i.Y()
       for j, p in order(xy) do
         lhs:add(p.y)
         if j < #xy and p.x ~= xy[j+1].x and big(j, #xy) then
-          out:add(val(lhs,tot-lhs),{col=col,bin=p.x}) end end end end
-  return out.has end
+          out(val(lhs,tot-lhs),{col=col,bin=p.x}) end end end end
+  return (out()) end
 
 -- ---- asking ----------------------------------------------------------
 -- Return the leaf `row` falls into: its `mu` is the guess for
@@ -123,7 +133,7 @@ function NODE.walk(i,    todo) --> fun
 -- the worst (as utf8 bytes: lua 5.1 has no \u{} escape).
 function NODE.show(i,    t,ends,cell,n) --> nil
   cell = function(col)
-    return col.it == NUM and str(col.mu) or best(col.has, same) end
+    return col.it == NUM and o(col.mu) or best(col.has, same) end
   t, ends = {}, {}
   for n in i:walk() do
     if not n.at then t[#t + 1] = n end end
@@ -135,7 +145,7 @@ function NODE.show(i,    t,ends,cell,n) --> nil
   for n in i:walk() do
     print(("%-26s %5d %6s%s%s"):format(
             ("|  "):rep(max(0, n.lvl-2)) .. n.txt, -- root gets no bar
-            n.n, str(n.mu), ends[n] or "   ", n:ycols(cell))) end
+            n.n, o(n.mu), ends[n] or "   ", n:ycols(cell))) end
   print"" end
 
 -- ---- predicting ------------------------------------------------------
@@ -163,11 +173,11 @@ function halves(    tbl,tr,te) --> TAB
   tr, te = tbl:clone(tr), tbl:clone(te)
   return tr, te, function(row) return tr:ydist(row) end end
 
-function eg.tree(    tr,te,y) --> nil
+function lab.tree(    tr,te,y) --> nil
   tr, te, y = halves()
   Tree(tr, tr.rows, y):show() end
 
-function eg.all(    tr,te,y,i,lo,m1,m2,d,err,n) --> nil
+function lab.all(    tr,te,y,i,lo,m1,m2,d,err,n) --> nil
   tr, te, y = halves()
   i  = Tree(tr, tr.rows, y)
   assert(i.n == #tr.rows, "root holds every training row")
@@ -186,11 +196,15 @@ function eg.all(    tr,te,y,i,lo,m1,m2,d,err,n) --> nil
   m2 = err(function() return i.mu end)
   print("tree", m1, "grand mean", m2, "depth", d)
   assert(m1 < m2, "tree lost to the grand mean")
+  n = least()                              -- what every cut runs on
+  for _, v in ipairs{3, 9, 1, 5} do n(v, "row" .. v) end
+  assert(n() == "row1" and select(2, n()) == 1)
+  assert(least()() == nil)                 -- offered nothing, holds
   print"PASS tree" end
 
 if (arg and arg[0] or ""):find"tree%.lua$" then
   the = cli()
-  run = eg[the.go] or eg.all
+  run = lab[the.go] or lab.all
   run() end
 
 return _ENV

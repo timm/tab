@@ -13,7 +13,8 @@ grep -q '^<<<<<<< ' README.md &&                 # else the markers
 head -1 README.md | grep -q '^# ' &&             # else the banner is
   { echo "README.md starts with its title; move it below the menubar";
     exit 1; }                                    # the whole file
-[ $# -gt 0 ] && files=("$@") || files=(tab.lua tab-eg.lua)
+[ $# -gt 0 ] && files=("$@") ||
+  files=(tab.lua tab-eg.lua tree.lua tree-eg.lua)
 
 banner() {                      # the banner, aimed at directory $1
   gawk 'BEGIN {RS = "\n# "}     # so record one is all above the title
