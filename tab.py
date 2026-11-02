@@ -6,6 +6,7 @@ Columns: Uppercase=Num, else Sym; names ending X skip, -+! are goals,
 
 Options:
   bins=7     numeric columns get this many bins
+  check=5    labels spent confirming the top of a ranking
   depth=4    how deep a tree may grow
   fmt=%.2f   how floats print
   leaf=8     rows each side of a cut needs
@@ -14,7 +15,7 @@ Options:
   test=None  held-out csv (None: demos test on train)
   train=~/gits/moot/optimize/misc/auto93.csv"""
 
-import sys, os, re
+import sys, os, re, time
 from math import exp, log
 from types import SimpleNamespace as o
 
@@ -258,11 +259,38 @@ def test_ydist():
   print(logfmt(guzzler=ok(t.ydist(t.rows[0]),       # a guzzler, far
                           0.7863215821)))           # from heaven
 
-def test_rmeans():
+def test_rmeans_basic():
   t = Tab(the.train)
   m = Rmeans(t, t.rows[:45], t.ydist)               # 45 labels in,
   print(logfmt(guess=ok(m.guess(t.rows[0]),         # same guess as
                         0.8530303902)))             # tab.lua, to 1e-6
+
+def test_rmeans():
+  t0 = time.perf_counter()
+  train = Tab(the.train)
+  test = train if the.test == "None" else Tab(the.test)
+  goal = train.y[0]                       # first y column is the goal
+  y = lambda r: r[goal.at]
+  m = Rmeans(train, [r for r in train.rows if y(r) != "?"], y)
+  err = Num()
+  for r in test.rows:
+    if y(r) != "?": err.add(abs(m.guess(r) - y(r)))
+  print(logfmt(flags=vars(the), goal=goal.txt, rows=err.n,
+               mae=err.mid(), sd=err.div(),
+               secs=time.perf_counter() - t0))
+  assert 0 < err.n <= len(test.rows)
+
+def test_optimize():
+  train = Tab(the.train)
+  test = train if the.test == "None" else Tab(the.test)
+  m = Rmeans(train, train.rows, train.ydist)   # ydist on the train...
+  guessed = sorted(test.rows, key=m.guess)     # ...sorts the test (x only)
+  best = min(guessed[:the.check], key=train.ydist)  # label check items
+  truth = sorted(test.rows, key=train.ydist)
+  rank = truth.index(best) + 1
+  print(logfmt(check=the.check, rank=rank, rows=len(truth),
+               best=train.ydist(best)))
+  assert 1 <= rank <= len(truth)
 
 def test_nb():
   t = Tab([["Age", "job", "klass!"],
@@ -285,6 +313,7 @@ def run(k):                     # a :name header, then the test,
   print(":" + k[5:]); globals()[k]()  # so ,/pretty can find sections
 
 def cli(argv):
+  if not argv: return print(__doc__)
   for s in argv:
     if   (k := "test_" + s.lstrip("-")) in globals(): run(k)
     elif "=" in s: k, v = s.split("=", 1); setattr(the, k, value(v))
