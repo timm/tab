@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# vim: set ts=2 sw=2 sts=2 et cc=75 :
 """tab.py: minimal tab.lua -- rmeans regression, naive bayes, trees.
 Columns: Uppercase=Num, else Sym; names ending X skip, -+! are goals,
 ! is the klass, - means minimize. (c) 2026 Tim Menzies, MIT.
@@ -9,7 +10,10 @@ Options:
   fmt=%.2f   how floats print
   leaf=8     rows each side of a cut needs
   m=2        m-estimate: prior weight for a thin bin
-  p=2        minkowski coefficient"""
+  p=2        minkowski coefficient
+  test=None  held-out csv (None: demos test on train)
+  train=~/gits/moot/optimize/misc/auto93.csv"""
+
 import sys, os, re
 from math import exp, log
 from types import SimpleNamespace as o
@@ -28,6 +32,31 @@ def csv(file):
     for line in f:                        
       s = line.strip()                   
       if s and s[0] != "#": yield [value(x) for x in s.split(",")]
+
+class Sym:
+  "Summarize a stream of symbols: counts, mode, entropy."
+  ops = ("==", "!=")
+  def __init__(i, txt="S", at=0):
+    i.txt, i.at, i.n, i.has = txt, at, 0, {}
+    i.w = 0 if txt.endswith("-") else 1
+  def add(i, v, inc=1):
+    if v != "?":
+      i.n += inc
+      i.has[v] = i.has.get(v, 0) + inc
+      if i.has[v] <= 0: del i.has[v]
+    return v
+  def mid(i): return max(i.has, key=i.has.get)   # the majority value
+  def div(i):                                  # entropy, in bits
+    return -sum(n / i.n * log(n / i.n) for n in i.has.values()) / log(2)
+  def norm(i, v): return v                     # a sym is its own norm
+  def bin(i, v): return v                      # and its own bin
+  def holds(i, x, v): return x == "?" or x == v  # "?" says yes: no cut
+  def cut(i, xy, Y):                             # ever loses a row
+    for v in sorted({x for x, _ in xy}, key=str):
+      near, far = Y(), Y()
+      for x, y in xy: (near if x == v else far).add(y)
+      yield near, far, v
+  def nVals(i): return max(2, len(i.has))
 
 class Num:
   "Summarize a stream of numbers: Welford's running mean and sd."
@@ -58,30 +87,6 @@ class Num:
       near.add(y); far.add(y, -1)
       if x != xy[j + 1][0]: yield near, far, x
 
-class Sym:
-  "Summarize a stream of symbols: counts, mode, entropy."
-  ops = ("==", "!=")
-  def __init__(i, txt="S", at=0):
-    i.txt, i.at, i.n, i.has = txt, at, 0, {}
-    i.w = 0 if txt.endswith("-") else 1
-  def add(i, v, inc=1):
-    if v != "?":
-      i.n += inc
-      i.has[v] = i.has.get(v, 0) + inc
-      if i.has[v] <= 0: del i.has[v]
-    return v
-  def mid(i): return max(i.has, key=i.has.get)   # the majority value
-  def div(i):                                  # entropy, in bits
-    return -sum(n / i.n * log(n / i.n) for n in i.has.values()) / log(2)
-  def norm(i, v): return v                     # a sym is its own norm
-  def bin(i, v): return v                      # and its own bin
-  def holds(i, x, v): return x == "?" or x == v  # "?" says yes: no cut
-  def cut(i, xy, Y):                             # ever loses a row
-    for v in sorted({x for x, _ in xy}, key=str):
-      near, far = Y(), Y()
-      for x, y in xy: (near if x == v else far).add(y)
-      yield near, far, v
-  def nVals(i): return max(2, len(i.has))
 
 class Tab:
   "Rows, summarized in columns: x independents, y goals, maybe a klass."
@@ -198,12 +203,15 @@ class Nb:
   def guess(i, row):
     return max(i.subs, key=lambda k: i.like(i.subs[k], row))
 
-# ---- cli --------------------------------------------------------
+# ---- test --------------------------------------------------------
 # Demos double as tests: each prints a little, asserts once.
-# usage: tab.py [file.csv | key=value | all | value | num | ...]
-DATA = "~/gits/moot/optimize/misc/auto93.csv"
-
+# usage: tab.py [key=value | all | value | num | ...]
 def near(a, b): return abs(a - b) < 1e-6
+
+def ok(got, want):            # assert, then hand the value back, so
+  assert got == want or (     # a demo can print and check in one line
+    isinstance(got, float) and near(got, want)), f"{got} != {want}"
+  return got
 
 def logfmt(_indent=0, **d):                  # k=v ...; a dict value indents +1
   pad = "  " * _indent
@@ -216,46 +224,45 @@ def logfmt(_indent=0, **d):                  # k=v ...; a dict value indents +1
       lines += [pad + k, logfmt(_indent + 1, **v)]
   return "\n".join(lines)
 
-def test_h():
-  print(__doc__)
-  assert "Options:" in __doc__
+def test_all():
+  for k in sorted(globals()):
+    if k.startswith("test_") and k != "test_all": run(k)
+  print("PASS")
 
-def test_value():
-  print(logfmt(got=value(" 4.2 ")))
-  assert value(" 4.2 ") == 4.2
+def test_h(): print(__doc__); assert "Options:" in __doc__
+
+def test_value(): print(logfmt(got=ok(value(" 4.2 "), 4.2)))
 
 def test_num():
   n = Num()
   for x in range(1, 11): n.add(x)
-  print(logfmt(mu=n.mid(), sd=n.div()))
-  assert near(n.div(), 3.0276503541)
+  print(logfmt(mu=n.mid(), sd=ok(n.div(), 3.0276503541)))
 
 def test_sym():
   s = Sym()
   for x in "aabccc": s.add(x)
-  print(logfmt(mode=s.mid(), ent=s.div()))
-  assert near(s.div(), 1.4591479170)
+  print(logfmt(mode=s.mid(), ent=ok(s.div(), 1.4591479170)))
 
 def test_tab():
-  t = Tab(DATA)
-  print(logfmt(rows=len(t.rows), x=len(t.x), y=len(t.y)))
-  assert len(t.rows) == 398 and len(t.x) == 4 and len(t.y) == 3
+  t = Tab(the.train)
+  print(logfmt(rows=ok(len(t.rows), 398), x=ok(len(t.x), 4),
+               y=ok(len(t.y), 3)))
 
 def test_mid():
-  t = Tab(DATA)
+  t = Tab(the.train)
   print(logfmt(**t.mid(t.y)))
-  assert near(t.mid(t.y)["Acc+"], 15.5680904523)
+  ok(t.mid(t.y)["Acc+"], 15.5680904523)
 
 def test_ydist():
-  t = Tab(DATA)
-  print(logfmt(guzzler=t.ydist(t.rows[0])))         # a guzzler, far
-  assert near(t.ydist(t.rows[0]), 0.7863215821)     # from heaven
+  t = Tab(the.train)
+  print(logfmt(guzzler=ok(t.ydist(t.rows[0]),       # a guzzler, far
+                          0.7863215821)))           # from heaven
 
 def test_rmeans():
-  t = Tab(DATA)
+  t = Tab(the.train)
   m = Rmeans(t, t.rows[:45], t.ydist)               # 45 labels in,
-  print(logfmt(guess=m.guess(t.rows[0])))           # same guess as
-  assert near(m.guess(t.rows[0]), 0.8530303902)     # tab.lua, to 1e-6
+  print(logfmt(guess=ok(m.guess(t.rows[0]),         # same guess as
+                        0.8530303902)))             # tab.lua, to 1e-6
 
 def test_nb():
   t = Tab([["Age", "job", "klass!"],
@@ -264,33 +271,23 @@ def test_nb():
            [65, "med", "yes"], [70, "hi", "yes"]])
   b = t.binned(t.rows)
   nb = Nb(b, b.rows)
-  print(logfmt(young=nb.guess(b.rows[0]), old=nb.guess(b.rows[-1])))
-  assert nb.guess(b.rows[0]) == "no"
+  print(logfmt(young=ok(nb.guess(b.rows[0]), "no"),
+               old=ok(nb.guess(b.rows[-1]), "yes")))
 
 def test_tree():
-  t = Tab(DATA)
+  t = Tab(the.train)
   node = Node(t, t.rows, [t.ydist(r) for r in t.rows])
   print(logfmt(**node.dict()))
   assert node.kids and len(node.rows) == 398
 
+# ---- main --------------------------------------------------------
 def run(k):                     # a :name header, then the test,
   print(":" + k[5:]); globals()[k]()  # so ,/pretty can find sections
 
-def test_all():
-  for k in sorted(globals()):
-    if k.startswith("test_") and k != "test_all": run(k)
-  print("PASS")
-
 def cli(argv):
-  for s in argv:                      # globals(), not vars(): in
-                                      # here, vars() is locals()
-    if "test_" + s.lstrip("-") in globals(): run("test_" + s.lstrip("-"))
-    elif "=" in s:
-      k, v = s.split("=", 1)
-      if hasattr(the, k): setattr(the, k, value(v))
-      else: sys.exit(f"unknown flag {k!r}; the flags: {the}")
-    elif s.endswith(".csv"): globals()["DATA"] = s
-    else: sys.exit(f"unknown arg {s!r}; try: " + " ".join(
-      k[5:] for k in sorted(globals()) if k.startswith("test_")))
+  for s in argv:
+    if   (k := "test_" + s.lstrip("-")) in globals(): run(k)
+    elif "=" in s: k, v = s.split("=", 1); setattr(the, k, value(v))
+    else: sys.exit("? " + s)
 
 if __name__ == "__main__": cli(sys.argv[1:])
