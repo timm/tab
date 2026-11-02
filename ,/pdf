@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # pdf: x.lua ==> ~/tmp/x.pdf, pretty-printed, 3-up landscape.
-# usage: ,/pdf file.lua [file.py ...]   (Chars=65 Font=4.5 ,/pdf f)
-# Lines=N aligns columns: each ^L in the source jumps to the next
-# column of N lines (otherwise ^L is just stripped).
-# a2ps splits option values on commas, so styles are installed
-# into a2ps's own library by name, then asked for by name: lua for
-# .lua, python for .py (a2ps ships that one), def for anything else.
+# usage: ,/pdf file.lua [file.py ...]
+#   Font=4.5   font size (flow mode default)
+#   Chars=65   wrap width
+#   Lines=118  column-aligned mode: a ^L at the END of a line jumps
+#              to the top of the next column of Lines rows; without
+#              Lines, ^Ls are stripped and the text just flows.
+# a2ps splits option values on commas, so styles are installed into
+# a2ps's own library by name, then asked for by name: lua for .lua,
+# python for .py (a2ps ships that one), def for anything else.
 Here="$(cd "$(dirname "$0")/.." && pwd)"
 Dir=$(a2ps --list=defaults 2>/dev/null \
       | awk '/library path/{getline; print $1; exit}')
@@ -18,32 +21,16 @@ for f in "$@"; do
   out=~/tmp/$(basename "${f%.*}").pdf
   style=def
   case "$f" in *.lua) style=lua;; *.py) style=python;; esac
-  [ -z "$Lines" ] && : ${Font:=4.5}   # flow mode: small default
-  a2ps -Br --quiet --landscape --pro=color              \
-       ${Lines:+-L $Lines} ${Font:+--font-size=$Font}    \
-       ${Chars:+--chars-per-line=$Chars}                 \
-       --line-numbers=1 --borders=no --columns=3 -M letter                \
-       --pretty-print=$style -o -                        \
-       --stdin="$(basename "$f")"                         \
-       $(if [ -n "$Lines" ]; then echo "$f"; fi)          \
-       $(if [ -z "$Lines" ]; then echo -; fi)             \
-       < <(tr -d '\f' < "$f")                             \
-    | ps2pdf - "$out" && echo "$out" && open "$out"
-done
-for f in "$@"; do
-  out=~/tmp/$(basename "${f%.*}").pdf
-  style=def
-  case "$f" in *.lua) style=lua;; *.py) style=python;; esac
-  a2ps -Br --quiet --landscape --pro=color              \
-       --chars-per-line="${Chars:-65}"                  \
-       ${Font:+--font-size=$Font}                       \
-       --line-numbers=1 --borders=no --columns=3        \
-       -M letter --pretty-print=$style -o -             \
-       ${Lines:+-L $Lines} --stdin="$(basename "$f")" -   \
-       < <(if [ -n "$Lines" ]; then
-             gawk -v L="$Lines" \
-               '/\f/ {sub(/\f/,""); while (n % L) {print ""; n++}}
-                      {print; n++}' "$f"
-           else tr -d '\f' < "$f"; fi)                     \
+  L=$Lines                             # a file with ^L in it gets
+  [ -z "$L" ] && grep -q "" "$f" && L=118   # column mode, always
+  F=$Font; [ -z "$L" ] && : "${F:=4.5}"
+  src="$f"; [ -z "$L" ] && src=/dev/stdin
+  a2ps -Br --quiet --landscape --pro=color             \
+       ${L:+-L $L} ${F:+--font-size=$F}  \
+       ${Chars:+--chars-per-line=$Chars}               \
+       --line-numbers=1 --borders=no --columns=3       \
+       -M letter --pretty-print=$style -o -            \
+       --stdin="$(basename "$f")" "$src"               \
+       < <(tr -d '\f' < "$f")                          \
     | ps2pdf - "$out" && echo "$out" && open "$out"
 done

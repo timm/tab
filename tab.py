@@ -87,8 +87,8 @@ class Num:
       near.add(y); far.add(y, -1)
       if x != xy[j + 1][0]: yield near, far, x
 
-
-class Tab:
+
+class Tab:
   "Rows, summarized in columns: x independents, y goals, maybe a klass."
   def __init__(i, src):
     i.rows, i.cols = [], None
@@ -132,7 +132,7 @@ class Num:
     d = sum(abs(c.norm(row[c.at]) - c.w) ** the.p for c in i.y) / len(i.y)
     return d ** (1 / the.p)
 
-class Node:
+class Tree:
   "A binary tree over rows; each split leaves the tightest ys behind."
   def __init__(i, tab, rows, ys, Y=None, txt="", lvl=1):
     Y = Y or (Sym if isinstance(ys[0], str) else Num)
@@ -146,7 +146,7 @@ class Node:
         for k, r in enumerate(rows):
           (a if i.go(r) else b).append((r, ys[k]))
         if len(a) >= the.leaf and len(b) >= the.leaf:  # else, a
-          i.kids = [Node(tab, [r for r, _ in t], [y for _, y in t], Y,
+          i.kids = [Tree(tab, [r for r, _ in t], [y for _, y in t], Y,
                          f"{i.col.txt} {op} {i.v}", lvl + 1)
                     for t, op in zip((a, b), i.col.ops)]    # bad cut
   def go(i, row): return i.col.holds(row[i.col.at], i.v)
@@ -185,7 +185,7 @@ class Rmeans:
     return s / w if w > 0 else i.all.mu
 
 class Nb:
-  "Naive Bayes: one sub-table per klass; guess the likeliest (binned data)."
+  "Naive Bayes: one sub-table per klass; guess likeliest (binned data)."
   def __init__(i, tab, rows):
     i.tab, i.subs, i.n, i.nKlass = tab, {}, len(rows), 0
     for r in rows:
@@ -198,12 +198,12 @@ class Nb:
     for j, col1 in enumerate(sub.x):
       v = row[col1.at]
       if v != "?":
-        L += log((col1.has.get(v, 0) + m) / (col1.n + m * i.tab.x[j].nVals()))
+        L += log((col1.has.get(v,0)+m) / (col1.n + m*i.tab.x[j].nVals()))
     return L
   def guess(i, row):
     return max(i.subs, key=lambda k: i.like(i.subs[k], row))
-
-# ---- test --------------------------------------------------------
+
+# ---- test --------------------------------------------------------
 # Demos double as tests: each prints a little, asserts once.
 # usage: tab.py [key=value | all | value | num | ...]
 def near(a, b): return abs(a - b) < 1e-6
@@ -213,7 +213,7 @@ def ok(got, want):            # assert, then hand the value back, so
     isinstance(got, float) and near(got, want)), f"{got} != {want}"
   return got
 
-def logfmt(_indent=0, **d):                  # k=v ...; a dict value indents +1
+def logfmt(_indent=0, **d):            # k=v ...; a dict value indents +1
   pad = "  " * _indent
   flat = " ".join(f"{k}={the.fmt % v if isinstance(v, float) else v}"
                   for k, v in sorted(d.items())
@@ -276,7 +276,7 @@ def test_nb():
 
 def test_tree():
   t = Tab(the.train)
-  node = Node(t, t.rows, [t.ydist(r) for r in t.rows])
+  node = Tree(t, t.rows, [t.ydist(r) for r in t.rows])
   print(logfmt(**node.dict()))
   assert node.kids and len(node.rows) == 398
 
