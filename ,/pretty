@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# pretty: a logfmt section, as a table. usage: ,/pretty [label] [cols]
+# `label` is the one field allowed to hold spaces, so it is cut off the
+# end and what is left splits on space.  `cols` is a comma-separated
+# order for the columns up front; the rest follow, as the record had
+# them.  `sect` is the `:name` section to draw; every other section
+# passes through.  An indent of two is one level, so the indent
+# becomes the tree guide.
+#   ,/pretty                      -- :tree, label txt, then n and mu
+#   ,/pretty txt n,mu,Lbs-,Acc+   -- say the column order yourself
+#   ,/pretty txt n,mu config      -- draw a different section
+# If any field holds spaces, `label` must name it -- it is cut off the
+# end, and nothing else may hold a space.
+gawk -v label="${1-txt}" -v cols="${2-n,mu}" -v sect="${3-tree}" '
+  BEGIN { nlead = split(cols, lead, ",")
+          for (j = 1; j <= nlead; j++) first[lead[j]] = 1 }
+  /^:/  { print; here = ($0 == ":" sect); next }   # a section opens
+  !here { print; next }                            # one draws, the
+  !/=/  { next }                      # a bare left or right; rest print
+  { row(deep(), chop(label)) }
+
+  function row(d,lab,    v,ord) {     # `v` and `ord` belong to this
+    parse(v, ord)                     # call, so need no clearing
+    if (!shown++) printf "%-26s%s\n", "", line(v, ord, 1)
+    printf "%-26s%s\n", bars(d) lab, line(v, ord) }
+
+  function deep() {                   # an indent of two is one level
+    match($0, /^ */); return RLENGTH / 2 }
+
+  function chop(k,    s) {            # cut field `k` off the end of
+    if (!k || !match($0, " *" k "=")) return ""   # $0 and return it,
+    s  = substr($0, RSTART + RLENGTH)             # spaces and all
+    $0 = substr($0, 1, RSTART - 1)
+    return s }
+
+  function parse(v,ord,    i,kv) {    # what is left is plain k=v, so
+    for (i = 1; i <= NF; i++) {       # keep both the values and the
+      split($i, kv, "="); v[kv[1]] = kv[2]; ord[i] = kv[1] } }
+
+  function line(v,ord,key,    s,i,j) {   # one row: the named columns in
+    for (j = 1; j <= nlead; j++)      # order, then all the others.
+      s = s sprintf("%8s", key ? lead[j] : v[lead[j]])
+    for (i = 1; i <= NF; i++)         # `key` asks for the names, for
+      if (!(ord[i] in first))         # the one header row
+        s = s sprintf("%10s", key ? ord[i] : v[ord[i]])
+    return s }
+
+  function bars(d,    g,k) {
+    for (k = 2; k <= d; k++) g = g "|  "
+    return g }'

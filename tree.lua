@@ -12,7 +12,8 @@ local tab = require "tab"
 if setfenv then setfenv(1, tab) end          -- tab's _ENV is ours too
 local _ENV = tab
 
-NODE, lab = {}, {}      -- lab[the.go]() runs at start up
+NODE = {}            -- slow[the.go]() runs at start up.  `slow`
+                     -- is tab's own registry, shared by every rig
 
 usage = [[
 flags:
@@ -122,6 +123,18 @@ function NODE.show(i,    t,ends,cell,n) --> nil; print `i`, one line per
             n.n, o(n.mu), ends[n] or "   ", n:ycols(cell))) end
   print"" end
 
+-- Return `i` as nested tables: this node's n, mu, split and y-column
+-- centers, then its two kids under `left` and `right`.  So `logfmt`
+-- prints the whole tree as a record a later run can be diffed against.
+function NODE.dict(i,    t) --> dict
+  t = {n = i.n, mu = i.mu}
+  if i.txt ~= "" then t.txt = i.txt end
+  for _, col in order(i.sub.y) do
+    t[col.txt] = col.it == NUM and col.mu or best(col.has, same) end
+  if i.at then
+    t.left, t.right = i.left:dict(), i.right:dict() end
+  return t end
+
 -- ---- predicting ------------------------------------------------------
 function NODE.posts(i,row,    n,t) --> dict; p(klass | `row`) off the leaf
   n, t = i:pick(row), {}
@@ -139,11 +152,19 @@ function halves(    tbl,tr,te) --> TAB; `the.file` as train and test TABs,
   tr, te = tbl:clone(tr), tbl:clone(te)
   return tr, te, function(row) return tr:ydist(row) end end
 
-function lab.tree(    tr,te,y) --> nil
+function slow.tree(    tr,te,y,i) --> nil
   tr, te, y = halves()
+  i = Tree(tr, tr.rows, y)
+  about()                     -- :config, then :tree -- two sections,
+  print"\n:tree"              -- which `,/pretty` draws as a table
+  print(logfmt(i:dict())) end
+
+function slow.show(    tr,te,y) --> nil
+  tr, te, y = halves()
+  about()
   Tree(tr, tr.rows, y):show() end
 
-function lab.all(    tr,te,y,i,lo,m1,m2,d,err,n) --> nil
+function slow.all(    tr,te,y,i,lo,m1,m2,d,err,n) --> nil
   tr, te, y = halves()
   i  = Tree(tr, tr.rows, y)
   assert(i.n == #tr.rows, "root holds every training row")
@@ -170,7 +191,7 @@ function lab.all(    tr,te,y,i,lo,m1,m2,d,err,n) --> nil
 
 if (arg and arg[0] or ""):find"tree%.lua$" then
   the = cli()
-  run = lab[the.go] or lab.all
+  run = slow[the.go] or slow.all
   run() end
 
 return _ENV

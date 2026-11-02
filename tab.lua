@@ -11,6 +11,7 @@ Range means, shrunk to the grand mean, weighed by variance.
 usage: lua tab.lua [name=value | action | file.csv ...]
 
 flags:
+  version=0.5.0    version number
   bins=7           numeric columns get this many bins
   budge=50         a fast test over this many ms belongs in slow
   budget=50        labels, all in
@@ -27,7 +28,7 @@ actions:
    --all           every fast action (--num, --split ... run one)
    --secs          slow: time rmeans, over `reps` repeats
 
-Any flag above can lead an action, so `reps=9 --secs` times nine.]]
+Any flag above can lead an action, so `reps=9 --secs` times ni:wne.]]
 
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
@@ -254,9 +255,15 @@ function cli(    k,v) --> dict; update `the` from the command line: a flag,
     else                       the.file = s end end
   return the end
 
+-- Restart the generator at `n`, or back at `the.seed`.  The setting
+-- and the state are two things: `the.seed` says where a run began,
+-- `rng` is where it has got to, so a header can still name the seed.
+function seed(n) --> nil
+  rng = n or the.seed end
+
 function rint(n) --> int; an int in 1..`n`, repeatable from `the.seed`.
-  the.seed = (16807 * the.seed) % 2147483647
-  return 1 + floor(n * the.seed / 2147483647) end
+  rng = (16807 * (rng or the.seed)) % 2147483647
+  return 1 + floor(n * rng / 2147483647) end
 
 function shuffle(t,    j) --> list; `t`, Fisher-Yates shuffled in place.
   for k = #t, 2, -1 do j = rint(k); t[k], t[j] = t[j], t[k] end
@@ -307,8 +314,9 @@ function print(...) --> nil; print the lot, tab separated, everything
 
 function fmt(s,...) return s:format(...) end --> str; format short had
 
--- Return `d:dict` as "k=v k=v" lines, keys sorted; a table value
--- recurses, indented one more stop (after tab.py's logfmt).
+-- Return `d:dict` as "k=v k=v" lines, keys sorted.  Atoms pack onto
+-- one line; a table value gets its key, then its own lines, indented
+-- one more stop.  So a nested dict prints as deep as it really is.
 function logfmt(d,indent,    pad,u,flat,out) --> str
   pad, u, flat, out = ("  "):rep(indent or 0), {}, {}, {}
   for k in pairs(d) do u[#u + 1] = k end
@@ -319,8 +327,23 @@ function logfmt(d,indent,    pad,u,flat,out) --> str
   if #flat > 0 then out[1] = pad .. table.concat(flat, " ") end
   for _, k in order(u) do
     if type(d[k]) == "table" then
+      out[#out + 1] = pad .. k
       out[#out + 1] = logfmt(d[k], (indent or 0) + 1) end end
   return table.concat(out, "\n") end
+
+-- Say what this run was: when it ran, which version ran it, what it
+-- was asked, and every setting in play.  An eg prints this above its
+-- results, so a result read a year later knows where it came from.
+-- Each block of a run leads with `:name`, so nothing has to be
+-- guessed from blank lines or indents.
+function about(    t) --> nil
+  print":config"                    -- a section, so a reader (and
+  t = {date = os.date"%Y-%m-%d %H:%M:%S", version = the.version,
+       cmd  = (arg and arg[0] or "?")
+              .. (arg and #arg > 0
+                  and " " .. table.concat(arg, " ") or "")}
+  print(logfmt(t))
+  print(logfmt(the)) end
 
 -- ---- actions ----------------------------------------------------
 fast, slow = {}, {}   -- fast: tests under --all.  slow: named only.

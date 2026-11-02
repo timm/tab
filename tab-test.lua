@@ -18,7 +18,7 @@ fast["--all"] = function(    b4,keys,t0,ms,worst,who)
     if not (" -h --all "):find(" " .. key .. " ", 1, true) then
       keys[#keys + 1] = key end end            -- the non-tests
   for _, key in order(keys, lt) do
-    the.seed, t0 = b4, os.clock()
+    seed(b4); t0 = os.clock()
     fast[key]()                       -- a fast test is small by design,
     ms = 1000 * (os.clock() - t0)   -- so time it and say who is not
     if ms > worst then worst, who = ms, key end end
@@ -27,11 +27,11 @@ fast["--all"] = function(    b4,keys,t0,ms,worst,who)
   assert(worst < the.budge, who .. " is slow: move it to slow") end
 
 slow["--secs"] = function(    reps,file,tbl,tot,t0,tr,te,sub,y,
-                             model,lim,seed)
+                             model,lim,b4)
   reps, file = the.reps, the.file  -- time rmeans: train, then guess
-  tbl, tot, seed = Tab(file), 0, the.seed
+  tbl, tot, b4 = Tab(file), 0, the.seed
   for s = 1, reps do
-    the.seed = seed + s
+    seed(b4 + s)
     tr, te = tbl:split()
     sub = tbl:clone(tr)
     y   = function(row) return sub:ydist(row) end
@@ -94,13 +94,13 @@ fast["--best"] = function(    k,n)
   assert(k == "y") end
 
 fast["--rint"] = function(    a,b,c,d)
-  the.seed = 1234567891
+  seed(1234567891)
   a, b, c, d = rint(100), rint(100), rint(100), rint(100)
   print("rint", a, b, c, d)
   assert(a == 19 and b == 70 and c == 6 and d == 8) end
 
 fast["--shuffle"] = function(    t)
-  the.seed = 1234567891
+  seed(1234567891)
   t = shuffle{1,2,3,4,5,6,7,8,9,10}
   print("shuffle", table.concat(t, ","))
   assert(table.concat(t, ",") == "10,9,4,3,6,5,8,1,7,2") end
@@ -173,7 +173,7 @@ fast["--ydist"] = function(    t,d)
   assert(d >= 0 and d <= 1) end
 
 fast["--split"] = function(    t,tr,te)
-  the.seed = 1234567891
+  seed(1234567891)
   t = Tab(the.file)
   tr, te = t:split()
   print("split", #tr, #te, table.concat(tr[1], ","))

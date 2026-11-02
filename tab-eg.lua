@@ -30,7 +30,7 @@ function home(f)                    -- cache dir, mirroring moot's tree
 
 -- ---- cache -----------------------------------------------------------
 function pair(tbl,s,    tr,te)      -- rep s's halves of tbl, by seed
-  the.seed = 1234567891 + s
+  seed(1234567891 + s)
   tr, te = tbl:split()
   return tbl:clone(tr), tbl:clone(te) end
 
@@ -253,14 +253,15 @@ function slow.rmeans()
 function slow.rmeansall()
   print(scored(the.file, "rmeansall", rmeansall, "rank,mae")) end
 
-the = cli()                 -- read late, so that a bare `rmeans` is
-                            -- an action of slow, and not a file name
-if (arg and arg[0] or ""):find"tab%-eg%.lua$" and the.go then
-  fun = slow[the.go] or fast[the.go]   -- a broken csv is a skip, not a
-  if not fun then                   -- stop; an unknown go says so
-    io.stderr:write("tab-eg.lua: no such go: ", the.go, "\n")
-  else
-    ok, err = pcall(fun)
-    if not ok then
-      io.stderr:write(the.file, ": ", tostring(err), "\n") end end end
+if (arg and arg[0] or ""):find"tab%-eg%.lua$" then
+  the = cli()               -- read late, so that a bare `rmeans` is an
+  if the.go then            -- action of slow, and not a file name; and
+    fun = slow[the.go] or fast[the.go]  -- read only when this is the
+    if not fun then         -- main script, since a required tab-eg
+      io.stderr:write("tab-eg.lua: no such go: ", the.go, "\n")
+    else                    -- would eat its caller's own actions
+      ok, err = pcall(fun)  -- a broken csv is a skip, not a stop
+      if not ok then
+        io.stderr:write(the.file, ": ", tostring(err), "\n")
+        end end end end
 return _ENV

@@ -9,9 +9,15 @@
 -- usage: luajit tree-eg.lua go=treemaj file=f.csv
 package.path = (arg[0]:match"^(.*)/" or ".") .. "/?.lua;" .. package.path
 require "tree"                      -- first: its usage sets defaults
-local tab = require "tab-eg"        -- last: its cli() overrides them
+local tab = require "tab-eg"        -- last: its stats and scoring
 if setfenv then setfenv(1, tab) end
 local _ENV = tab
+
+usage = [[
+flags:
+  file=~/gits/moot/classify/diabetes.csv   a table with a klass
+]]
+for k, v in usage:gmatch"\n%s+(%a+)=(%S+)" do the[k] = values(v)[1] end
 
 -- Return a tree over `tr`'s binned rows, split to leave the least
 -- klass entropy behind, with that binned table beside it.  Binning
@@ -73,13 +79,14 @@ function arm(who,how,score,what)    -- one cached run of one arm
                  function(tr,te) return score(tr, te, how) end,
                  what)) end end
 
-lab.treemaj    = arm("treemaj",    majGuess, treeScore, "acc,pd,pf,d2h")
-lab.treenb     = arm("treenb",     nbGuess,  treeScore, "acc,pd,pf,d2h")
-lab.treemajauc = arm("treemajauc", majPosts, treeAuc,   "auc,klasses")
-lab.treenbauc  = arm("treenbauc",  nbPosts,  treeAuc,   "auc,klasses")
+slow.treemaj    = arm("treemaj",    majGuess, treeScore, "acc,pd,pf,d2h")
+slow.treenb     = arm("treenb",     nbGuess,  treeScore, "acc,pd,pf,d2h")
+slow.treemajauc = arm("treemajauc", majPosts, treeAuc,   "auc,klasses")
+slow.treenbauc  = arm("treenbauc",  nbPosts,  treeAuc,   "auc,klasses")
 
 if (arg and arg[0] or ""):find"tree%-eg%.lua$" then
-  ok, err = pcall(lab[the.go] or eg[the.go]
+  the = cli()                       -- read late: every usage block
+  ok, err = pcall(slow[the.go] or fast[the.go]   -- has had its say
                   or function() error("no go=" .. tostring(the.go)) end)
   if not ok then
     io.stderr:write(the.file, ": ", tostring(err), "\n") end end
