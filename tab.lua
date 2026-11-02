@@ -197,16 +197,18 @@ function Rmeans(tbl,rows,y, --> RMEANS; per x column, its bins' y means
     i.has[col.at] = {bins = bins, w = max(0, w)} end
   return i end
 
-function RMEANS.guess(i,row,    s,w,it,v,mu) --> num; `row`'s guess: bin
-  s, w, mu = 0, 0, i.all.mu
+function RMEANS.like(i,col,row,    it,v) --> num,num; `col`'s
+  it = i.has[col.at]    -- m-estimated guess for `row`, and its worth
+  v  = it and it.bins[col:bin(row[col.at])]
+  if v and it.w > 0 then
+    return (v.n * v.mu + the.m * i.all.mu) / (v.n + the.m), it.w end end
+
+function RMEANS.guess(i,row,    s,w,g,wt) --> num; `row`'s guess: the
+  s, w = 0, 0           -- worth-weighted mean of every column's like
   for _, col in order(i.cols) do
-    it = i.has[col.at]
-    v  = it and it.bins[col:bin(row[col.at])]
-    if v and it.w > 0 then
-      s = s + it.w * (v.n * v.mu + the.m * mu) / (v.n + the.m)
-      w = w + it.w end end
-  if w > 0 then return s / w end
-  return i.all.mu end
+    g, wt = i:like(col, row)
+    if g then s, w = s + wt * g, w + wt end end
+  return w > 0 and s / w or i.all.mu end
 
 -- ---- bayes -----------------------------------------------------------
 function Nb(tbl,rows,    i,col,v) --> NB; one sub-TAB per klass in `rows`

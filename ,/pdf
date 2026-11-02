@@ -20,6 +20,7 @@ for f in "$@"; do
        --chars-per-line="${Chars:-65}"                  \
        --font-size="${Font:-4.5}"                       \
        --line-numbers=1 --borders=no --columns=3        \
-       -M letter --pretty-print=$style -o - "$f"        \
+       -M letter --pretty-print=$style -o -             \
+       --stdin="$(basename "$f")" - < <(tr -d '\f' < "$f") \
     | ps2pdf - "$out" && echo "$out" && open "$out"
 done
