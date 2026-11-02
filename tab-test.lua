@@ -73,6 +73,11 @@ fast["--csv"] = function(    t)
   assert(#t == 399 and #t[1] == 8)
   assert(t[1][1] == "Clndrs" and t[2][1] == 8) end
 
+fast["--logfmt"] = function(    s)
+  s = logfmt{seed = 1, go = "nb", sub = {b = 2, a = 1}}
+  print(s)
+  assert(s == 'go=nb seed=1\nsub\n  a=1 b=2') end
+
 fast["--map"] = function(    t)
   t = map({10,20,30}, function(v,k) return v + k end)
   print("map", table.concat(t, ","))
