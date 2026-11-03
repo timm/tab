@@ -12,10 +12,14 @@ Options:
   leaf=8     rows each side of a cut needs
   m=2        m-estimate: prior weight for a thin bin
   p=2        minkowski coefficient
+  rounds=10  members in a bag or a boost
+  size=1.0   rows per member, as a fraction of all of them
+  seed=1234567891  random number seed
   test=None  held-out csv (None: demos test on train)
   train=~/gits/moot/optimize/misc/auto93.csv"""
 
 import sys, os, re, time
+from bisect import bisect
 from math import exp, log
 from types import SimpleNamespace as o
 
@@ -27,6 +31,32 @@ def value(x):                            # "4.2" -> 4.2; "x" -> "x"
     except ValueError: return x
 
 the = o(**{k:value(v) for k,v in re.findall(r"\n\s+(\w+)=(\S+)",__doc__)})
+
+rng = None                               # the generator's state, kept
+def seed(n=None):                        # apart from `the.seed`, which
+  "Restart the generator at N, or back at the.seed."
+  global rng
+  rng = n or the.seed
+
+def rint(n):
+  """1..N, Park-Miller, under 2^53 -- so lua, python and lisp draw the
+  same stream and a resample is the same resample in all three."""
+  global rng
+  rng = (16807 * (rng or the.seed)) % 2147483647
+  return 1 + int(n * rng / 2147483647)
+
+def some(rows, n=None):
+  "N rows drawn with replacement -- one bootstrap sample."
+  return [rows[rint(len(rows)) - 1] for _ in range(n or len(rows))]
+
+def pick(lst, n=0):
+  "N items without replacement, or all of them when N is 0."
+  if not n or n >= len(lst): return lst
+  u = lst[:]
+  for j in range(len(u) - 1, 0, -1):     # Fisher-Yates, on tab's own
+    k = rint(j + 1) - 1                  # rint, so a draw is a seed
+    u[j], u[k] = u[k], u[j]
+  return u[:n]
 
 def csv(file):                               
   with open(os.path.expanduser(file), encoding="utf-8-sig") as f:    
@@ -118,11 +148,11 @@ class Tab:
     return out
   def mid(i, cols=None):               # {name: middle}, for logfmt
     return {c.txt: c.mid() for c in (cols or i.cols)}
-  def cut(i, rows, ys, Y=None):
+  def cut(i, rows, ys, Y=None, cols=None):
     Y = Y or (Sym if isinstance(ys[0], str) else Num)
     best, col1, v1 = 1e30, None, None
-    for col in i.x:
-      xy = [(x, ys[k]) for k, r in enumerate(rows)
+    for col in cols or i.x:               # `cols` lets a caller look at
+      xy = [(x, ys[k]) for k, r in enumerate(rows)   # only some of them
             if (x := r[col.at]) != "?"]
       for near, far, v in col.cut(xy, Y):
         if near.n >= the.leaf and far.n >= the.leaf:
@@ -135,23 +165,31 @@ class Tab:
 
 class Tree:
   "A binary tree over rows; each split leaves the tightest ys behind."
-  def __init__(i, tab, rows, ys, Y=None, txt="", lvl=1):
+  def __init__(i, tab, rows, ys, Y=None, cols=0, txt="", lvl=1):
     Y = Y or (Sym if isinstance(ys[0], str) else Num)
     i.rows, i.txt, i.lvl, i.kids, i.all = rows, txt, lvl, [], Y()
     for y in ys: i.all.add(y)
     i.mu = i.all.mid()                   # a mean, or a majority
     if len(rows) >= 2 * the.leaf and lvl < the.depth:
-      i.col, i.v = tab.cut(rows, ys, Y)
+      i.col, i.v = tab.cut(rows, ys, Y, pick(tab.x, cols))
       if i.col:
         a, b = [], []
         for k, r in enumerate(rows):
           (a if i.go(r) else b).append((r, ys[k]))
         if len(a) >= the.leaf and len(b) >= the.leaf:  # else, a
           i.kids = [Tree(tab, [r for r, _ in t], [y for _, y in t], Y,
-                         f"{i.col.txt} {op} {i.v}", lvl + 1)
+                         cols, f"{i.col.txt} {op} {i.v}", lvl + 1)
                     for t, op in zip((a, b), i.col.ops)]    # bad cut
   def go(i, row): return i.col.holds(row[i.col.at], i.v)
-  def leaf(i, row):
+  def posts(i, row):                   # so a bag of trees can average
+    """p(klass | row), from the counts in the leaf this row falls
+    into -- or {} when the leaf holds a mean, since a number has no
+    distribution to report."""
+    n = i.leaf(row).all
+    return ({k: v / n.n for k, v in n.has.items()}
+            if hasattr(n, "has") else {})
+  def guess(i, row): return i.leaf(row).mu   # so a Tree, like an Nb,
+  def leaf(i, row):                          # is a base learner
     while i.kids: i = i.kids[0] if i.go(row) else i.kids[1]
     return i
   def dict(i):
@@ -203,7 +241,93 @@ class Nb:
     return L
   def guess(i, row):
     return max(i.subs, key=lambda k: i.like(i.subs[k], row))
+  def posts(i, row):
+    "p(klass | row), so an ensemble can average how sure it is."
+    t  = {k: i.like(sub, row) for k, sub in i.subs.items()}
+    hi = max(t.values())                 # subtract the top first, or
+    t  = {k: exp(v - hi) for k, v in t.items()}   # exp underflows
+    z  = sum(t.values())
+    return {k: v / z for k, v in t.items()}
 
+class Bag:
+  """Bagging: `the.rounds` members, each fit on its own bootstrap
+  sample, one vote each.  LEARN is the base learner -- anything
+  callable as Learn(tab, rows) that answers guess(row), so an Nb or a
+  Tree both fit.  Variance goes down; bias does not."""
+  def __init__(i, tab, rows, Learn=Nb, rounds=None, size=None):
+    n = int((size or the.size) * len(rows))   # a full bootstrap sees
+    i.all = [Learn(tab, some(rows, n))        # 63% of the rows; less
+             for _ in range(rounds or the.rounds)]   # sees less, and
+  def posts(i, row):
+    """The members' own distributions, averaged -- a ranking, not a
+    label, so an auc can be taken."""
+    sums = {}
+    for m in i.all:
+      if hasattr(m, "posts"):
+        for k, p in m.posts(row).items(): sums[k] = sums.get(k, 0) + p
+    z = sum(sums.values()) or 1
+    return {k: v / z for k, v in sums.items()}
+  def guess(i, row):                          # differs more
+    """Averages, where it can.  A label cannot be averaged, so if a
+    member says how sure it is, those are summed; else the labels
+    vote, and numbers take the mean."""
+    p = i.posts(row)                     # {} means no member had a
+    if p: return max(p, key=p.get)       # distribution to average
+    gs = [m.guess(row) for m in i.all]
+    if not isinstance(gs[0], str): return sum(gs) / len(gs)
+    votes = {}
+    for g in gs: votes[g] = votes.get(g, 0) + 1
+    return max(votes, key=votes.get)
+
+class Boost:
+  """Boosting (SAMME): each round fits on rows drawn toward whatever
+  the last round got wrong, then votes with a weight set by its own
+  error.  LEARN is the base learner, as for Bag.  Bias goes down, and
+  a base learner that cannot be pushed around gains nothing."""
+  def __init__(i, tab, rows, Learn=Nb, rounds=None):
+    at, n = tab.klass.at, len(rows)
+    ks    = len({r[at] for r in rows})
+    w     = [1 / n] * n
+    i.all = []
+    for _ in range(rounds or the.rounds):
+      m   = Learn(tab, i.draw(rows, w))
+      bad = [m.guess(r) != r[at] for r in rows]
+      err = sum(wj for wj, b in zip(w, bad) if b)
+      a   = log((1 - err) / max(err, 1e-9)) + log(max(ks - 1, 1))
+      i.all.append((max(a, 1e-9), m))    # always one member, so a
+      if err <= 0 or err >= 1 - 1 / ks:  # guess is never a vote of
+        break                            # nobody: perfect, or no
+      w   = [wj * (exp(a) if b else 1)   # better than guessing
+             for wj, b in zip(w, bad)]
+      tot = sum(w)
+      w   = [wj / tot for wj in w]
+  def draw(i, rows, w):
+    "Rows with replacement, each as likely as its weight."
+    cdf, tot = [], 0
+    for wj in w:
+      tot += wj
+      cdf.append(tot)
+    return [rows[min(bisect(cdf, rint(10 ** 9) / 10 ** 9 * tot),
+                     len(rows) - 1)] for _ in rows]
+  def posts(i, row):
+    """Each member's distribution, weighted by what its error earned
+    it, so the ranking and the label agree -- which an auc printed
+    beside an accuracy needs them to."""
+    sums = {}
+    for a, m in i.all:
+      if hasattr(m, "posts"):
+        for k, p in m.posts(row).items(): sums[k] = sums.get(k, 0) + a*p
+    z = sum(sums.values()) or 1
+    return {k: v / z for k, v in sums.items()}
+  def guess(i, row):
+    p = i.posts(row)
+    if p: return max(p, key=p.get)
+    votes = {}
+    for a, m in i.all:
+      k = m.guess(row)
+      votes[k] = votes.get(k, 0) + a
+    return max(votes, key=votes.get)
+
 # ---- test --------------------------------------------------------
 # Demos double as tests: each prints a little, asserts once.
 # usage: tab.py [key=value | all | value | num | ...]
@@ -301,6 +425,36 @@ def test_nb():
   nb = Nb(b, b.rows)
   print(logfmt(young=ok(nb.guess(b.rows[0]), "no"),
                old=ok(nb.guess(b.rows[-1]), "yes")))
+
+def test_rint():
+  seed()                               # the same stream as tab.lua's
+  print(logfmt(got=ok(" ".join(str(rint(100)) for _ in range(6)),
+                      "19 70 6 8 69 89")))
+
+def test_bag():
+  t = Tab(the.train)                   # a bag of trees over a number:
+  ys = [t.ydist(r) for r in t.rows]    # no label to vote on, so the
+  seed()                               # members' guesses are averaged
+  b = Bag(t, t.rows, lambda tb, rs: Tree(tb, rs, [tb.ydist(r)
+                                                  for r in rs]), 5)
+  one = b.guess(t.rows[0])
+  print(logfmt(members=len(b.all), guess=one))
+  assert len(b.all) == 5 and 0 <= one <= 1
+
+def test_boost():
+  t = Tab([["Age", "job", "klass!"],
+           [20, "low", "no"], [22, "low", "no"], [25, "low", "no"],
+           [30, "med", "no"], [60, "hi", "yes"], [62, "hi", "yes"],
+           [65, "med", "yes"], [70, "hi", "yes"]])
+  b = t.binned(t.rows)
+  seed()
+  for who, m in (("bag", Bag(b, b.rows, Nb, 5)),
+                 ("boost", Boost(b, b.rows, Nb, 5))):
+    p = m.posts(b.rows[0])
+    print(logfmt(who=who, members=len(m.all),
+                 sure=ok(round(sum(p.values()), 6), 1.0),
+                 young=ok(m.guess(b.rows[0]), "no"),
+                 old=ok(m.guess(b.rows[-1]), "yes")))
 
 def test_tree():
   t = Tab(the.train)
