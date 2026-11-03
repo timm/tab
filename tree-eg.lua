@@ -29,7 +29,7 @@ for k, v in usage:gmatch"\n%s+(%a+)=(%S+)" do the[k] = values(v)[1] end
 -- klasses -- it would be reporting the shape of the tree, not what
 -- the tree learned.  Take the smallest depth that can name them all,
 -- then one level of slack, and never less than `the.depth`.
-function ktree(tr,    trb,k,d,was,i) --> NODE, TAB
+function ktree(tr,    trb,k,d,was,i) --> TREE, TAB
   trb  = tr:clone(tr.rows, "bin")
   k, d = trb.klass:nVals(), 2
   while 2^(d-1) < k do d = d + 1 end

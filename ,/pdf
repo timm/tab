@@ -22,7 +22,9 @@ for f in "$@"; do
   style=def
   case "$f" in *.lua) style=lua;; *.py) style=python;; esac
   L=$Lines                             # a file with ^L in it gets
-  [ -z "$L" ] && grep -q "" "$f" && L=118   # column mode, always
+  [ -z "$L" ] && grep -q "" "$f" &&         # column mode: fit the
+    L=$(awk 'BEGIN{RS="\f"}                    # biggest ^L segment
+             {n=split($0,a,"\n"); if(n>m)m=n} END{print m+1}' "$f")
   F=$Font; [ -z "$L" ] && : "${F:=4.5}"
   src="$f"; [ -z "$L" ] && src=/dev/stdin
   a2ps -Br --quiet --landscape --pro=color             \

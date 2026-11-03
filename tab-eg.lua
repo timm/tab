@@ -12,6 +12,7 @@ package.path = (arg[0]:match"^(.*)/" or ".") .. "/?.lua;" .. package.path
 local tab = require "tab"
 if setfenv then setfenv(1, tab) end          -- tab's _ENV is ours too
 local _ENV = tab
+BAG, SAME = {}, {}   -- the classes defined below
 cache = os.getenv"CACHE"           -- ../tab-dev/cache, if ,/sh
 if not cache or cache == "" then   -- "" is true in lua, so an
   cache = (os.getenv"HOME" or "~") .. "/tmp/cache" end -- empty
@@ -102,7 +103,7 @@ function SAME.ok(i) --> bool; true if all stats pass
   return i:cohen() <= .35 and i:cliffs() <= .195 and i:ks() <= 1.36 end
 
 function SAME.cohen(i,  a,b,sd) --> num; pooled sds.
-  a, b = nums(i.xs), nums(i.ys)
+  a, b = adds(i.xs), adds(i.ys)
   sd = sqrt(((a.n-1) * a:div()^2 + (b.n-1) * b:div()^2) / (a.n+b.n-2))
   return abs(a.mu - b.mu) / (sd + 1e-32) end
 
@@ -256,12 +257,12 @@ function slow.rmeansall()
 if (arg and arg[0] or ""):find"tab%-eg%.lua$" then
   the = cli()               -- read late, so that a bare `rmeans` is an
   if the.go then            -- action of slow, and not a file name; and
-    fun = slow[the.go] or fast[the.go]  -- read only when this is the
+    fun = slow[the.go] or eg[the.go]  -- read only when this is the
     if not fun then         -- main script, since a required tab-eg
       io.stderr:write("tab-eg.lua: no such go: ", the.go, "\n")
     else                    -- would eat its caller's own actions
       ok, err = pcall(fun)  -- a broken csv is a skip, not a stop
       if not ok then
-        io.stderr:write(the.file, ": ", tostring(err), "\n")
+        io.stderr:write(tostring(the.file), ": ", tostring(err), "\n")
         end end end end
 return _ENV
