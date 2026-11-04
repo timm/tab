@@ -1,0 +1,149 @@
+-- inc.yue: incremental nb + rmeans over tab.lua's columns.
+-- Training is prequential: after `warm` rows, guess first, then
+-- (always) update.  Early guesses are bad; that is just how it goes.
+-- An optional test=file is scored with updates frozen, so these
+-- learners can meet batch learners on the same external 80:20 split.
+-- usage: yue -e inc.yue go=nb     file=train.csv [test=hold.csv]
+--        yue -e inc.yue go=rmeans file=train.csv [test=hold.csv]
+package.path = ((arg and arg[0] or "")\match("^(.*)/") or ".") ..
+               "/?.lua;" .. package.path
+_ENV = require "tab"
+if setfenv then setfenv 1, _ENV
+
+the.warm = 10
+NBI, RMI = {}, {}
+
+-- ---- rows, one at a time ----------------------------------------------
+lines = (file) -> -- iterator; one value-row per call.
+  path = file\gsub "^~", os.getenv("HOME") or "~"
+  f = io.lines path
+  -> for line in f
+    s = line\match "^%s*(.-)%s*$"
+    if s != "" and s\sub(1, 1) != "#" then return values s
+
+-- ---- generic learner ---------------------------------------------------
+-- A learner is a tab (a rowless TAB whose live cols norm and bin),
+-- plus five verbs: want (a row's y), caught (y landed), add1 (one
+-- binned x cell, conditioned on y), guess, and loss (one guess's
+-- badness).  Given those, update and err are the same for everybody.
+
+adds = (i, row) -> -- every col eats its cell (so bins drift along)
+  col\add row[col.at] for col in *i.cols
+
+nvals = (col) -> -- values col might take, right now.
+  return the.bins if col.it == NUM
+  max 2, sum col.has, -> 1
+
+update = (i, row) -> -- learn `row`: all cols, then y-conditioned bins
+  adds i.tab, row
+  y = i\want row
+  return if y == "?"
+  i\caught y
+  for col in *i.tab.x
+    b = col\bin row[col.at]
+    i\add1 col, b, y if b != "?"
+
+err = (i, row) -> -- one guess's badness, or "?" when unscorable
+  want, got = i\want(row), i\guess row
+  return "?" if want == "?" or got == nil
+  i\loss want, got
+
+-- ---- incremental naive bayes ------------------------------------------
+Nbi = (names) -> -- NBI; one Sym of bins per (klass, x col)
+  new NBI, {tab: Tab({names}), subs: {}}
+
+NBI.want = (i, row) -> row[i.tab.klass.at]
+
+NBI.caught = same -- the klass col, fed by adds, catches the priors
+
+NBI.add1 = (i, col, b, k) ->
+  sub = i.subs[k]
+  unless sub
+    sub = {}
+    sub[c.at] = Sym! for c in *i.tab.x
+    i.subs[k] = sub
+  sub[col.at]\add b
+
+NBI.like = (i, k, sub, row) -> -- log P(k) + log P(row | k)
+  kl = i.tab.klass
+  s = log ((kl.has[k] or 0) + the.m) / (kl.n + the.m * nvals kl)
+  for col in *i.tab.x
+    v = row[col.at]
+    if v != "?"
+      b, sym = col\bin(v), sub[col.at]
+      s += log(((sym.has[b] or 0) + the.m) / (sym.n + the.m * nvals col))
+  s
+
+NBI.guess = (i, row) -> -- likeliest klass, or nil when nothing seen yet
+  return nil unless next i.subs
+  (best i.subs, (sub, k) -> i\like k, sub, row)
+
+NBI.loss = (i, want, got) -> want == got and 0 or 1
+
+-- ---- incremental range means ------------------------------------------
+Rmi = (names) -> -- RMI; one Num of y per (x col, bin)
+  i = new RMI, {tab: Tab({names}), has: {}}
+  i.goal = #i.tab.y == 1 and i.tab.y[1].it == NUM and i.tab.y[1]
+  i.all = i.goal or Num! -- the goal col, fed by adds, catches y;
+  i                      -- ydist has no col, so then RMI must catch
+
+RMI.want = (i, row) -> -- the y: one NUM y's value, else distance
+  return row[i.goal.at] if i.goal  -- to heaven
+  i.tab\ydist row
+
+RMI.caught = (i, y) -> i.all\add y unless i.goal
+
+RMI.add1 = (i, col, b, y) ->
+  t = i.has[col.at] or {}
+  i.has[col.at] = t
+  t[b] = t[b] or Num!
+  t[b]\add y
+
+RMI.like = (i, col, row) -> -- col's m-shrunk guess for row, and its
+  bins = i.has[col.at]      -- worth: the variance it cuts
+  v = bins and bins[col\bin row[col.at]]
+  return unless v
+  w = i.all\div!^2 - sum bins, (u) -> u.n / i.all.n * u\div!^2
+  if w > 0
+    (v.n * v.mu + the.m * i.all.mu) / (v.n + the.m), w
+
+RMI.guess = (i, row) -> -- worth-weighted mean of every column's like
+  return nil if i.all.n == 0
+  s, w = 0, 0
+  for col in *i.tab.x
+    g, wt = i\like col, row
+    if g then s, w = s + wt * g, w + wt
+  w > 0 and s / w or i.all.mu
+
+RMI.loss = (i, want, got) -> abs got - want
+
+-- ---- prequential train, frozen test -----------------------------------
+learn = (make) -> -- model from the.file (guess-then-update after warm);
+  m, post = nil, nil        -- if the.test, its score too, no updates
+  n, pre = 0, Num!
+  for row in lines the.file
+    n += 1
+    if n == 1 then m = make row
+    else
+      pre\add err(m, row) if n > the.warm + 1
+      update m, row
+  if the.test and the.test != "None"
+    post, n = Num!, 0
+    for row in lines the.test
+      n += 1
+      post\add err(m, row) if n > 1
+  m, pre, post
+
+report = (what, pre, post) -> -- one line per phase
+  print fmt ":prequential %s n=%s %s=%s", the.file, pre.n, what, o pre.mu
+  if post
+    print fmt ":frozen %s n=%s %s=%s", the.test, post.n, what, o post.mu
+
+slow.nb     = -> report "err", select 2, learn Nbi
+slow.rmeans = -> report "mae", select 2, learn Rmi
+
+if (arg and arg[0] or "")\find "inc%.[yl]u[ae]$"
+  cli!
+  slow[the.go]! if the.go and slow[the.go]
+
+_ENV
