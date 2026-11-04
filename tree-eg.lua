@@ -40,7 +40,7 @@ function ktree(tr,    trb,k,d,was,i) --> TREE, TAB
   return i, trb end
 
 -- ---- the two answers -------------------------------------------------
-function majGuess(i,row) return i:pick(row).mu end       --> atom
+function majGuess(i,row) return i:pick(row).mid end      --> atom
 function majPosts(i,row) return i:posts(row) end         --> dict
 function nbGuess(i,row)  return i:pick(row):nb():guess(row) end --> atom
 function nbPosts(i,row)  return i:pick(row):nb():posts(row) end --> dict

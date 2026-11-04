@@ -318,7 +318,7 @@ function Tree(tbl,rows,y,Y,lvl,cols) --> TREE
          :sum():grow() end
 
 -- What this node answers with: `i.ys` (one y per row), `i.all` (those
--- ys, summarized), `i.mu` (their mean, or their majority) and `i.row`
+-- ys, summarized), `i.mid` (their mean, or their majority) and `i.row`
 -- (the best row -- only when the ys are numbers, since a klass has no
 -- best).  A side effect, so `Tree` above stays one line.
 function TREE.sum(i,    v,pay) --> TREE
@@ -327,7 +327,7 @@ function TREE.sum(i,    v,pay) --> TREE
     v = i.y(row); i.ys[row] = v; i.all:add(v)
     if pay then pay(v, row) end end
   i.row = pay and pay()
-  i.mu  = i.all.mu or i.all:mid()   -- a mean, or a majority
+  i.mid = i.all.mu or i.all:mid()   -- a mean, or a majority
   return i end
 
 -- `i`, with two kids under it when a cut pays: deep enough to bother,
@@ -363,7 +363,7 @@ function TREE.sub(i) --> TAB; `i.rows`, summarized, made once
   return i.subbed end
 
 -- ---- asking ----------------------------------------------------------
-function TREE.pick(i,row,    c) --> TREE; leaf `row` falls into: its `mu`
+function TREE.pick(i,row,    c) --> TREE; leaf `row` falls into: its `mid`
   if not i.at then return i end
   c = i.at
   return (c.col:holds(row[c.col.at], c.v) and i.left or i.right)
@@ -389,22 +389,22 @@ function TREE.show(i,    t,ends,cell,n) --> nil; print `i`, one line per
   t, ends = {}, {}
   for n in i:walk() do
     if not n.at then t[#t + 1] = n end end
-  sort(t, "mu")
+  sort(t, "mid")
   ends[t[#t]] = " \226\156\151 "            -- cross the worst leaf,
   ends[t[1]]  = " \226\156\147 "            -- tick the best one
-  print(("%-26s %5s %6s   %s"):format("", "n", "mu",
+  print(("%-26s %5s %6s   %s"):format("", "n", "mid",
         i:ycols(function(col) return col.txt end)))
   for n in i:walk() do
     print(("%-26s %5d %6s%s%s"):format(
             ("|  "):rep(max(0, n.lvl-2)) .. n.txt, -- root gets no bar
-            n.n, o(n.mu), ends[n] or "   ", n:ycols(cell))) end
+            n.n, o(n.mid), ends[n] or "   ", n:ycols(cell))) end
   print"" end
 
--- Return `i` as nested tables: this node's n, mu, split and y-column
+-- Return `i` as nested tables: this node's n, mid, split and y-column
 -- centers, then its two kids under `left` and `right`.  So `logfmt`
 -- prints the whole tree as a record a later run can be diffed against.
 function TREE.dict(i,    t) --> dict
-  t = {n = i.n, mu = i.mu}
+  t = {n = i.n, mid = i.mid}
   if i.txt ~= "" then t.txt = i.txt end
   for _, col in order(i:sub().y) do
     t[col.txt] = col.it == NUM and col.mu or best(col.has, same) end
@@ -446,7 +446,7 @@ function Forest(tbl,rows,rounds,    i,c) --> FOREST
 function FOREST.votes(i,row,    t,ks,k) --> dict,list; tally, in order
   t, ks = {}, {}
   for _, m in order(i.all) do
-    k = m:pick(row).mu
+    k = m:pick(row).mid
     if k ~= nil then
       if t[k] == nil then ks[#ks + 1] = k end
       t[k] = (t[k] or 0) + 1 end end
@@ -757,8 +757,8 @@ function slow.all(    tr,te,y,i,lo,m1,m2,d,err,n) --> nil
   err = function(fn)                      -- mean error of a guess
           return adds(te.rows, Num(), function(row)
                    return abs(y(row) - fn(row)) end).mu end
-  m1 = err(function(row) return i:pick(row).mu end)
-  m2 = err(function() return i.mu end)
+  m1 = err(function(row) return i:pick(row).mid end)
+  m2 = err(function() return i.mid end)
   print("tree", m1, "grand mean", m2, "depth", d)
   assert(m1 < m2, "tree lost to the grand mean")
   n = argmin()                              -- what every cut runs on

@@ -173,7 +173,7 @@ class Tree:
     Y = Y or (Sym if isinstance(ys[0], str) else Num)
     i.rows, i.txt, i.lvl, i.kids, i.all = rows, txt, lvl, [], Y()
     for y in ys: i.all.add(y)
-    i.mu = i.all.mid()                   # a mean, or a majority
+    i.mid = i.all.mid()                  # a mean, or a majority
     if len(rows) >= 2 * the.leaf and lvl < the.depth:
       i.col, i.v = tab.cut(rows, ys, Y, pick(tab.x, cols))
       if i.col:
@@ -192,12 +192,12 @@ class Tree:
     n = i.leaf(row).all
     return ({k: v / n.n for k, v in n.has.items()}
             if hasattr(n, "has") else {})
-  def guess(i, row): return i.leaf(row).mu   # so a Tree, like an Nb,
+  def guess(i, row): return i.leaf(row).mid  # so a Tree, like an Nb,
   def leaf(i, row):                          # is a base learner
     while i.kids: i = i.kids[0] if i.go(row) else i.kids[1]
     return i
   def dict(i):
-    d = {"n": len(i.rows), "mu": i.mu}
+    d = {"n": len(i.rows), "mid": i.mid}
     if i.txt: d["txt"] = i.txt
     if i.kids: d["left"], d["right"] = i.kids[0].dict(), i.kids[1].dict()
     return d
