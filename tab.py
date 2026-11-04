@@ -68,17 +68,21 @@ class Sym:
   "Summarize a stream of symbols: counts, mode, entropy."
   ops = ("==", "!=")
   def __init__(i, txt="S", at=0):
-    i.txt, i.at, i.n, i.has = txt, at, 0, {}
+    i.txt, i.at, i.n, i.has, i.cl = txt, at, 0, {}, 0
     i.w = 0 if txt.endswith("-") else 1
   def add(i, v, inc=1):
     if v != "?":
       i.n += inc
-      i.has[v] = i.has.get(v, 0) + inc
-      if i.has[v] <= 0: del i.has[v]
-    return v
-  def mid(i): return max(i.has, key=i.has.get)   # the majority value
+      c = i.has.get(v, 0)
+      if c > 0: i.cl -= c * log(c)      # `i.cl` is sum(c*log c), kept
+      c += inc                          # here so `div` need not walk
+      if c <= 0: del i.has[v]           # `i.has` -- a sum in dict
+      else: i.has[v], i.cl = c, i.cl + c * log(c)   # order is a sum
+    return v                            # lua cannot reproduce
+  def mid(i):                                    # the majority value,
+    return max(sorted(i.has, key=str), key=i.has.get)  # ties on `str`
   def div(i):                                  # entropy, in bits
-    return -sum(n / i.n * log(n / i.n) for n in i.has.values()) / log(2)
+    return 0 if i.n < 1 else max(0, log(i.n) - i.cl / i.n) / log(2)
   def norm(i, v): return v                     # a sym is its own norm
   def bin(i, v): return v                      # and its own bin
   def holds(i, x, v): return x == "?" or x == v  # "?" says yes: no cut
@@ -243,7 +247,7 @@ class Nb:
     return max(i.subs, key=lambda k: i.like(i.subs[k], row))
   def posts(i, row):
     "p(klass | row), so an ensemble can average how sure it is."
-    t  = {k: i.like(sub, row) for k, sub in i.subs.items()}
+    t  = {k: i.like(i.subs[k], row) for k in sorted(i.subs, key=str)}
     hi = max(t.values())                 # subtract the top first, or
     t  = {k: exp(v - hi) for k, v in t.items()}   # exp underflows
     z  = sum(t.values())

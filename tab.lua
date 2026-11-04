@@ -13,15 +13,15 @@ usage: lua tab.lua [name=value | action | file.csv ...]
 flags:
   version=0.6.0    version number
   bins=7           numeric columns get this many bins
-  budge=50         a fast test over this many ms belongs in slow
   budget=50        labels, all in
   check=5          of those, saved for the test rows
   fmt=%.2f         how a fraction is printed
-  depth=4          how deep a tree may grow
-  leaf=8           rows each side of a cut needs
+  depth=12         how deep a tree may grow
+  leaf=2           rows each side of a cut needs
   m=2              m-estimate: prior weight for a thin bin
   p=2              minkowski coefficient
   reps=3           repeats, when something is timed
+  rounds=30        trees in a forest
   seed=1234567891  random number seed
   test=None        held-out csv (None: demos test on train)
   train=~/gits/moot/optimize/misc/auto93.csv
@@ -35,7 +35,7 @@ Any flag above can lead an action, so `seed=1 --split` is a thing.]]
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
 
-TAB,NUM,SYM,RMEANS,NB,TREE = {},{},{},{},{},{}
+TAB,NUM,SYM,RMEANS,NB,TREE,FOREST = {},{},{},{},{},{},{}
 
 -- ---- values ---------------------------------------------------------
 function values(s,   u,v) --> row; values from comma-separated `s`.
@@ -58,29 +58,60 @@ function Col(txt,at) --> SYM | NUM; a-z Sym; A-Z Num.
    return (txt:find"^%u" and Num or Sym)(txt, at) end
 
 function Sym(txt,at) --> SYM; counts of symbols seen in column `at`.
-  return new(SYM, {txt = txt or "S", at = at or 0, n = 0, has = {}}) end
+  return new(SYM, {txt = txt or "S", at = at or 0, n = 0, has = {},
+                   cl = 0}) end
 
-function SYM.add(i,v,inc) --> value; `inc` more of `v` (-1 = one less).
+-- `i.cl` is sum(c*log c) over the counts, kept up to date here so
+-- `div` need not walk `i.has` at all.  Two reasons.  Order: `pairs`
+-- has none and floating point addition is not associative, so a sum
+-- taken in hash order makes an entropy's last bits -- and so a tie
+-- between two cuts -- turn on how the table laid itself out, and
+-- (measured) the same seed then grew a different forest run to run.
+-- Cost: a cut sweep calls `add` twice and `div` twice per candidate,
+-- so paying two logs here beats paying one per klass there.
+function SYM.add(i,v,inc,    c) --> value; `inc` more of `v` (-1 = less)
   if v == "?" then return v end
   inc = inc or 1
   i.n = i.n + inc
-  i.has[v] = (i.has[v] or 0) + inc
-  if i.has[v] <= 0 then i.has[v] = nil end
+  c   = i.has[v] or 0
+  if c > 0 then i.cl = i.cl - c * log(c) end
+  c = c + inc
+  if c <= 0
+  then i.has[v] = nil
+  else i.has[v] = c; i.cl = i.cl + c * log(c) end
   return v end
 
-function SYM.div(i,    fn) --> num; entropy, in bits.
-  fn = function(n) return -n/i.n * log(n/i.n) end
-  return sum(i.has, fn) / log(2) end
+-- H = -sum (c/n) log(c/n) = log n - (1/n) sum c log c, and `add`
+-- already holds that inner sum, so this is arithmetic, not a walk.
+function SYM.div(i) --> num; entropy, in bits.
+  return i.n < 1 and 0
+         or max(0, log(i.n) - i.cl / i.n) / log(2) end
 
-function SYM.mid(i) return (best(i.has, same)) end --> value; the mode.
+-- The mode, with a tie broken on `tostring` -- once per node, not
+-- once per candidate cut, so the sort is affordable and `pairs`
+-- order (which differs between ports) never decides a leaf's label.
+function SYM.mid(i,    ks,b,bk) --> value; the mode
+  ks = {}
+  for v, _ in pairs(i.has) do ks[#ks + 1] = v end
+  sort(ks, function(x,y) return tostring(x) < tostring(y) end)
+  b = -1
+  for _, v in order(ks) do
+    if i.has[v] > b then b, bk = i.has[v], v end end
+  return bk end
 function SYM.norm(i,v) return v end --> value; a sym is its own norm
 function SYM.holds(i,x,v) return x == "?" or x == v end --> bool
 function SYM.bin(i,v) return v end --> value; and its own bin
 
-function SYM.cut(i,xy,Y,out,    d,near,far) --> one cut per symbol
-  d = {}
-  for _, p in order(xy) do d[p.x] = (d[p.x] or 0) + 1 end
-  for v, _ in pairs(d) do
+-- `vs` is sorted on `tostring`, not left to `pairs`: a tie between
+-- two symbols is then broken the same way on every run and in every
+-- port, and `pairs` order is neither.
+function SYM.cut(i,xy,Y,out,    d,vs,near,far) --> one cut per symbol
+  d, vs = {}, {}
+  for _, p in order(xy) do
+    if d[p.x] == nil then vs[#vs + 1] = p.x end
+    d[p.x] = (d[p.x] or 0) + 1 end
+  sort(vs, function(a,b) return tostring(a) < tostring(b) end)
+  for _, v in order(vs) do
     near, far = Y(), Y()
     for _, p in order(xy) do
       (p.x == v and near or far):add(p.y) end
@@ -123,8 +154,10 @@ function NUM.norm(i,v,    z) --> value; `v` on a logistic cdf, clipped
 -- Offer `out` one cut between each pair of distinct sorted neighbours:
 -- sort once, grow `near` left to right while `far` sheds the same.
 function NUM.cut(i,xy,Y,out,    near,far)
-  sort(xy, "x")
-  near, far = Y(), Y()
+  for k, p in order(xy) do p.at = k end  -- `table.sort` is unstable, so
+  sort(xy, function(a,b)                 -- rows tied on x would land in
+    return a.x < b.x or (a.x == b.x and a.at < b.at) end)  -- any order:
+  near, far = Y(), Y()                   -- keep the order they came in
   for _, p in order(xy) do far:add(p.y) end
   for j, p in order(xy) do
     near:add(p.y); far:add(p.y, -1)
@@ -158,9 +191,10 @@ function TAB.clone(i,rows,how,    out) --> TAB; `rows` in a fresh TAB
       function(col) return col[how](col, row[col.at]) end) end
   return Tab(out) end
 
-function TAB.mid(i,cols,    fn) --> dict; {name: middle}, for logfmt.
-  fn = function(c) u[c.txt] = c:mid() end
-  return map(cols or i.cols, fn) wns
+function TAB.mid(i,cols,    u) --> dict; {name: middle}, for logfmt.
+  u = {}
+  for _, col in order(cols or i.cols) do u[col.txt] = col:mid() end
+  return u end
 
 function TAB.ydist(i,row,    fn) --> num; `row`'s distance to heaven
   fn = function(col) return abs(col:norm(row[col.at]) - col.w)^the.p end
@@ -176,13 +210,13 @@ function TAB.split(i,    rows,n,t,u1,u2) --> rows,rows; 80:20, off a
 -- Offer `out` every cut of every x column over `rows`: `ys` is one
 -- y per row; `Y` collects them, so what "least diversity" means --
 -- Num and sd, or Sym and entropy -- is the caller's choice.
-function TAB.cut(i,rows,ys,Y,out,    xy,x,offer,col1)
+function TAB.cut(i,rows,ys,Y,out,cols,    xy,x,offer,col1)
   Y = Y or (type(ys[1]) == "string" and Sym or Num)
   offer = function(near,far,v)  -- the one scorer and leaf guard, for
     if near.n >= the.leaf and far.n >= the.leaf then  -- every column
       out((near:div()*near.n + far:div()*far.n) / (near.n + far.n),
           {col = col1, v = v}) end end
-  for _, col in order(i.x) do
+  for _, col in order(pick(i.x, cols)) do   -- `cols`=0: all of them
     col1 = col
     xy = {}
     for k, row in order(rows) do
@@ -240,35 +274,76 @@ function NB.like(i,sub,row,    fn) --> num; log P(`row` | `sub:TAB`)
   return log((#sub.rows + the.m) / (i.n + the.m * i.nKlass)) -- m/klass
          + sum(sub.x, fn) end
 
-function NB.guess(i,row,    fn) --> value; `row`'s likeliest klass.
-  fn = function(sub) return i:like(sub, row) end
-  return (best(i.subs, fn)) end
+-- The klasses, in a fixed order: `pairs` has none, so without this
+-- a tie between two equally likely klasses -- and the last bits of
+-- `posts`'s normalizing sum -- would turn on the hash layout.
+function NB.klasses(i,    ks) --> list; `i.subs`'s keys, sorted
+  ks = {}
+  for k, _ in pairs(i.subs) do ks[#ks + 1] = k end
+  sort(ks, function(a,b) return tostring(a) < tostring(b) end)
+  return ks end
+
+function NB.guess(i,row,    b,bk,v) --> value; `row`'s likeliest klass.
+  b = -math.huge
+  for _, k in order(i:klasses()) do
+    v = i:like(i.subs[k], row)
+    if v > b then b, bk = v, k end end      -- strict: first wins
+  return bk end
+
+-- p(klass | `row`), so an ensemble can average how sure it is -- and
+-- so an auc has a score to rank by.  `like` returns a LOG likelihood,
+-- so the top one comes off before `exp`, which would otherwise
+-- underflow to zero for every klass at once.
+function NB.posts(i,row,    ks,t,hi,z,u) --> dict
+  ks, t, hi = i:klasses(), {}, -math.huge
+  for _, k in order(ks) do
+    t[k] = i:like(i.subs[k], row)
+    hi   = max(hi, t[k]) end
+  z = 0
+  for _, k in order(ks) do t[k] = exp(t[k] - hi); z = z + t[k] end
+  u = {}
+  for _, k in order(ks) do u[k] = t[k] / z end
+  return u end
 
 -- ---- tree ----------------------------------------------------------
-function Tree(tbl,rows,y,Y,lvl,    i,v,pay,all,cut,a,b,t,op) --> TREE;
-  rows = rows or tbl.rows             -- one node over `rows`, then,
-  y    = y or function(row) return tbl:ydist(row) end  -- while the
-  Y    = Y or Num                     -- cuts stay big enough, kids
-  lvl  = lvl or 1
-  i   = new(TREE, {tbl = tbl, rows = rows, y = y, lvl = lvl, Y = Y,
-                   n = #rows, sub = tbl:clone(rows), ys = {}, txt = ""})
-  all, pay = Y(), Y == Num and argmin()   -- a klass has no best row
-  for _, row in order(rows) do
-    v = y(row); i.ys[row] = v; all:add(v)
+-- One node over `rows`, summarized, then grown.  `cols` is how many
+-- x columns a split may look at (0 = all of them); it rides down the
+-- tree so every node redraws its own few.
+function Tree(tbl,rows,y,Y,lvl,cols) --> TREE
+  rows = rows or tbl.rows
+  y    = y or function(row) return tbl:ydist(row) end
+  Y    = Y or Num
+  return new(TREE, {tbl = tbl, rows = rows, y = y, Y = Y, lvl = lvl or 1,
+                    cols = cols or 0, n = #rows, ys = {}, txt = ""})
+         :sum():grow() end
+
+-- What this node answers with: `i.ys` (one y per row), `i.all` (those
+-- ys, summarized), `i.mu` (their mean, or their majority) and `i.row`
+-- (the best row -- only when the ys are numbers, since a klass has no
+-- best).  A side effect, so `Tree` above stays one line.
+function TREE.sum(i,    v,pay) --> TREE
+  i.all, pay = i.Y(), i.Y == Num and argmin()
+  for _, row in order(i.rows) do
+    v = i.y(row); i.ys[row] = v; i.all:add(v)
     if pay then pay(v, row) end end
-  i.all = all
   i.row = pay and pay()
-  i.mu  = all.mu or best(all.has, same)   -- a mean, or a majority
-  cut = i.n >= 2*the.leaf and lvl < the.depth and i:cut()
+  i.mu  = i.all.mu or i.all:mid()   -- a mean, or a majority
+  return i end
+
+-- `i`, with two kids under it when a cut pays: deep enough to bother,
+-- big enough to split, and both sides big enough to keep.  Each kid
+-- is a `Tree`, which grows in turn -- so the pair recurse together.
+function TREE.grow(i,    cut,a,b,t,op) --> TREE
+  cut = i.n >= 2*the.leaf and i.lvl < the.depth and i:cut()
   if cut then
     a, b = {}, {}
-    for _, row in order(rows) do
+    for _, row in order(i.rows) do
       t = cut.col:holds(row[cut.col.at], cut.v) and a or b
       t[#t + 1] = row end
     if #a >= the.leaf and #b >= the.leaf then   -- else, a bad cut
       i.at = cut
-      i.left  = Tree(tbl, a, y, Y, lvl+1)
-      i.right = Tree(tbl, b, y, Y, lvl+1)
+      i.left  = Tree(i.tbl, a, i.y, i.Y, i.lvl+1, i.cols)
+      i.right = Tree(i.tbl, b, i.y, i.Y, i.lvl+1, i.cols)
       op = cut.col.it == SYM and {"==", "~="} or {"<=", ">"}
       i.left.txt  = cut.col.txt.." "..op[1].." "..o(cut.v)
       i.right.txt = cut.col.txt.." "..op[2].." "..o(cut.v) end end
@@ -276,7 +351,16 @@ function Tree(tbl,rows,y,Y,lvl,    i,v,pay,all,cut,a,b,t,op) --> TREE;
 
 function TREE.cut(i,    ys) --> dict; the cut of `i.rows` leaving
   ys = map(i.rows, function(row) return i.ys[row] end) -- the least
-  return (i.sub:cut(i.rows, ys, i.Y, argmin())()) end  -- y diversity
+  return (i.tbl:cut(i.rows, ys, i.Y, argmin(), i.cols)()) end -- y div
+
+-- A TAB of just `i.rows`, so `ycols` and `dict` can report what this
+-- node's y columns look like.  Cloning is the costliest thing a node
+-- can do and only reporting needs it -- `cut` reads `col.at` and the
+-- rows it is handed, never a column's running stats -- so this waits
+-- until something asks.  A 30-tree forest never asks.
+function TREE.sub(i) --> TAB; `i.rows`, summarized, made once
+  i.subbed = i.subbed or i.tbl:clone(i.rows)
+  return i.subbed end
 
 -- ---- asking ----------------------------------------------------------
 function TREE.pick(i,row,    c) --> TREE; leaf `row` falls into: its `mu`
@@ -287,7 +371,7 @@ function TREE.pick(i,row,    c) --> TREE; leaf `row` falls into: its `mu`
 
 function TREE.ycols(i,f,    t) --> str; one cell per y column -- `f(col)`
   t = {}
-  for k, col in order(i.sub.y) do
+  for k, col in order(i:sub().y) do
     t[k] = ("%" .. max(10, #col.txt + 2) .. "s"):format(f(col)) end
   return table.concat(t) end
 
@@ -322,23 +406,68 @@ function TREE.show(i,    t,ends,cell,n) --> nil; print `i`, one line per
 function TREE.dict(i,    t) --> dict
   t = {n = i.n, mu = i.mu}
   if i.txt ~= "" then t.txt = i.txt end
-  for _, col in order(i.sub.y) do
+  for _, col in order(i:sub().y) do
     t[col.txt] = col.it == NUM and col.mu or best(col.has, same) end
   if i.at then
     t.left, t.right = i.left:dict(), i.right:dict() end
   return t end
 
 -- ---- predicting ------------------------------------------------------
+function TREE.nb(i) --> NB; leaf's own naive Bayes, fitted the first time
+  i.model = i.model or Nb(i:sub(), i.rows)   -- asked for (tree-eg's
+  return i.model end                         -- nbGuess and nbPosts)
+
 function TREE.posts(i,row,    n,t) --> dict; p(klass | `row`) off the leaf
   n, t = i:pick(row), {}
   for k, m in pairs(n.all.has) do t[k] = m / n.all.n end
   return t end
 
-function TREE.nb(i) --> NB; leaf's own naive Bayes, fitted the first time
-  i.model = i.model or Nb(i.sub, i.rows)
-  return i.model end
-
 
+-- ---- forest ---------------------------------------------------------
+-- `rounds` deep trees, each on its own bootstrap of `rows`, each node
+-- splitting on sqrt(#x) columns it draws itself.  Breiman's random
+-- forest, so: rows sampled once per tree, attributes resampled at
+-- every split.
+function Forest(tbl,rows,rounds,    i,c) --> FOREST
+  rows = rows or tbl.rows
+  c    = max(1, floor(sqrt(#tbl.x)))
+  i    = new(FOREST, {all = {}, tbl = tbl})
+  for k = 1, rounds or the.rounds do
+    i.all[k] = Tree(tbl, some(rows, #rows),
+                    function(row) return row[tbl.klass.at] end,
+                    Sym, 1, c) end
+  return i end
+
+-- A HARD vote: each tree offers one label -- its leaf's majority --
+-- and `ks` is the order the labels first arrived in.  That order is
+-- the tie-break: two labels on 15 votes each are settled by which
+-- tree spoke first, which is the same in any port, where `pairs`
+-- order is not.
+function FOREST.votes(i,row,    t,ks,k) --> dict,list; tally, in order
+  t, ks = {}, {}
+  for _, m in order(i.all) do
+    k = m:pick(row).mu
+    if k ~= nil then
+      if t[k] == nil then ks[#ks + 1] = k end
+      t[k] = (t[k] or 0) + 1 end end
+  return t, ks end
+
+-- The tally, normalized, so this still reads as p(klass | `row`) and
+-- anything wanting a score to rank by (an auc) still has one.
+function FOREST.posts(i,row,    t,ks,z,u) --> dict
+  t, ks = i:votes(row)
+  z, u  = 0, {}
+  for _, k in order(ks) do z = z + t[k] end
+  for _, k in order(ks) do u[k] = t[k] / max(z, 1) end
+  return u end
+
+function FOREST.guess(i,row,    t,ks,b,bk) --> value; the most voted
+  t, ks = i:votes(row)
+  b = -1
+  for _, k in order(ks) do
+    if t[k] > b then b, bk = t[k], k end end   -- strict: first wins
+  return bk end
+
 -- ---- misc ---------------------------------------------------------
 function new(meta,i) --> inst; connect instance `i` to its class `meta`;
   meta.__index, meta.it, meta.__tostring = meta, meta, o
@@ -365,6 +494,22 @@ function rint(n) --> int; an int in 1..`n`, repeatable from `the.seed`.
 function shuffle(t,    j) --> list; `t`, Fisher-Yates shuffled in place.
   for k = #t, 2, -1 do j = rint(k); t[k], t[j] = t[j], t[k] end
   return t end
+
+-- `n` of `t`, drawn WITH replacement: one bootstrap sample.  At
+-- n=#t about 63% of `t` turns up at least once, so the rest is that
+-- member's out-of-bag rows -- free held-out data, no extra split.
+function some(t,n,    u) --> list
+  u = {}
+  for k = 1, n or #t do u[k] = t[rint(#t)] end
+  return u end
+
+-- `n` of `t`, no replacement; all of `t` when `n` is 0 or too big.
+-- Shuffles a copy on tab's own `rint`, so a draw is a seed.
+function pick(t,n,    u) --> list
+  if not n or n == 0 or n >= #t then return t end
+  u = shuffle(map(t, same))              -- a copy: never `t` itself
+  for k = #u, n + 1, -1 do u[k] = nil end
+  return u end
 
 function map(t,fn,    u) --> list; `fn(v,k)` over `t`, nils dropped.
   u={}; for k, v in ipairs(t) do u[#u+1] = fn(v, k) end
