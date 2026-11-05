@@ -52,25 +52,25 @@ function treeScore(tr,te,how,    i,trb,bag,col) --> str
   bag, col = Bag(), trb.klass
   for _, row in order(tr:clone(te.rows, "bin").rows) do
     bag:tally(row[col.at], how(i, row)) end
-  return ("%.1f,%.1f,%.1f,%.3f"):format(bag:score()) end
+  return Acc:format(bag:score()) end
 
--- Return the macro mean of every klass's one-against-the-rest auc,
--- and how many klasses that was.  Same shape as `bayesAuc`, so the
--- numbers sit in the same column of the same chart.
-function treeAuc(tr,te,how,    i,trb,col,rows,post,t,sum,k,a) --> str
+-- Return every klass's one-against-the-rest auc, averaged by klass
+-- frequency and again equally, with the klass count between them.
+-- Same shape as `bayesAuc`, so the numbers sit in the same column of
+-- the same chart.
+function treeAuc(tr,te,how,    i,trb,col,rows,post,t,cols) --> str
   i, trb = ktree(tr)
   col    = trb.klass
   rows   = tr:clone(te.rows, "bin").rows
   post   = {}
   for _, row in order(rows) do post[row] = how(i, row) end
-  sum, k = 0, 0
-  for x in pairs(col.has) do
+  cols = {}
+  for _, x in order(keys(col.has)) do       -- sorted, not `pairs`
     t = {}
     for _, row in order(rows) do
       t[#t + 1] = {post[row][x] or 0, row[col.at] == x} end
-    a = auc(t)
-    if a then sum, k = sum + a, k + 1 end end
-  return ("%.4f,%d"):format(k > 0 and sum / k or 0, k) end
+    cols[#cols + 1] = t end
+  return aucline(cols) end
 
 -- ---- rigs ------------------------------------------------------------
 function arm(who,how,score,what)    -- one cached run of one arm
@@ -79,10 +79,10 @@ function arm(who,how,score,what)    -- one cached run of one arm
                  function(tr,te) return score(tr, te, how) end,
                  what)) end end
 
-slow.treemaj    = arm("treemaj",    majGuess, treeScore, "acc,pd,pf,d2h")
-slow.treenb     = arm("treenb",     nbGuess,  treeScore, "acc,pd,pf,d2h")
-slow.treemajauc = arm("treemajauc", majPosts, treeAuc,   "auc,klasses")
-slow.treenbauc  = arm("treenbauc",  nbPosts,  treeAuc,   "auc,klasses")
+slow.treemaj    = arm("treemaj",    majGuess, treeScore, AccCols)
+slow.treenb     = arm("treenb",     nbGuess,  treeScore, AccCols)
+slow.treemajauc = arm("treemajauc", majPosts, treeAuc,   AucCols)
+slow.treenbauc  = arm("treenbauc",  nbPosts,  treeAuc,   AucCols)
 
 if (arg and arg[0] or ""):find"tree%-eg%.lua$" then
   the = cli()                       -- read late: every usage block

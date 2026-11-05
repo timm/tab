@@ -52,6 +52,13 @@ function scored(file,who,fun,what,    dir,f,h,tbl,t0,line,ok) -- once
   return f end
 
 -- ---- scoring ---------------------------------------------------------
+-- The two score headers, named once, so an arm cannot write a column
+-- order its reader does not expect.
+Acc     = "%.1f,%.1f,%.1f,%.3f,%.1f,%.1f,%.3f"
+AccCols = "acc,pd,pf,d2h,macropd,macropf,macrod2h"
+AucCols = "auc,klasses,macroauc"
+
+-- ---- (scoring) ---------------------------------------------------------
 function Bag() --> BAG; blank counts, for one test set.
   return new(BAG, {n = 0, ok = 0, got = {}, want = {}, hit = {}}) end
 
@@ -74,12 +81,31 @@ function BAG.score1(i,x,    tp,fp,fn,tn,r1,f1) --> num; klass `x:value`'s
   f1 = fp + tn > 0 and fp / (fp + tn) or 0
   return r1, f1, sqrt((1 - r1) ^ 2 + f1 ^ 2) / sqrt(2) end
 
-function BAG.score(i,    k,pd,pf,d2h,r1,f1,d1) --> num; `i`'s macro acc
-  k, pd, pf, d2h = 0, 0, 0, 0
-  for x in pairs(i.want) do
+function BAG.klasses(i) return keys(i.want) end --> list; sorted, so
+                                     -- the sums below add in one order
+
+-- Return `i`'s accuracy, then pd, pf and d2h weighted by klass
+-- frequency, then the same three averaged equally over klasses, then
+-- the klass count.  Two averages, because they answer two questions:
+-- the weighted one asks how the learner does on a row drawn from this
+-- data, the macro one how it does on a klass drawn from its klasses.
+-- Under imbalance they part company hard, and a rare klass the model
+-- never names costs the macro mean its whole share and the weighted
+-- mean almost nothing.
+--
+-- The weighted pd is the accuracy.  sum_x (n_x/n)(tp_x/n_x) is
+-- sum_x tp_x / n, so the two agree by construction, not by luck of
+-- this data.  Reported anyway, so `pd` means one thing in every
+-- column of every chart and the identity is on the page.
+function BAG.score(i,    k,pd,pf,d2h,wd,wf,wh,w,r1,f1,d1) --> num
+  k, pd, pf, d2h, wd, wf, wh = 0, 0, 0, 0, 0, 0, 0
+  for _, x in order(i:klasses()) do
     r1, f1, d1 = i:score1(x)
-    k, pd, pf, d2h = k + 1, pd + r1, pf + f1, d2h + d1 end
-  return 100*i.ok/i.n, 100*pd/k, 100*pf/k, d2h/k, k end
+    w          = i.want[x]
+    k, pd, pf, d2h = k + 1, pd + r1, pf + f1, d2h + d1
+    wd, wf, wh     = wd + w*r1, wf + w*f1, wh + w*d1 end
+  return 100*i.ok/i.n, 100*wd/i.n, 100*wf/i.n, wh/i.n,
+         100*pd/k, 100*pf/k, d2h/k, k end
 
 function auc(t,    ps,ns,u,j,k,tot) --> num; chance a random positive
   ps, ns = {}, {}                 -- outscores a random negative, given
@@ -93,6 +119,38 @@ function auc(t,    ps,ns,u,j,k,tot) --> num; chance a random positive
     while k < #ns and ns[k+1] == x do k = k + 1 end
     tot = tot + j + (k - j) / 2 end
   return tot / (#ps * #ns) end
+
+-- Return `t`'s keys, sorted on `tostring`.  Every klass walk that
+-- feeds a sum needs this: `pairs` has no order, float addition is not
+-- associative, and the two together make a score that drifts between
+-- ports and between runs.
+function keys(t,    ks) --> list
+  ks = {}
+  for k in pairs(t) do ks[#ks+1] = k end
+  return sort(ks, function(a,b) return tostring(a) < tostring(b) end) end
+
+-- Return `auc,klasses,macroauc` over `cols`, one {score,want} list
+-- per klass -- the same list `auc` above takes.  The weighted mean
+-- leans on the klasses that actually show up; the macro mean beside
+-- it is what every earlier run reported.
+--
+-- A klass with no positives, or none negative, has no auc in this
+-- split at all, so it is dropped and the weights renormalise over
+-- what is left (`w`, not `#cols`).  Weighting a measurement that does
+-- not exist would be scoring a gap as though it were a result.
+function aucline(cols,    a,nk,tot,w,mac,sum) --> str
+  tot, w, mac = 0, 0, {}
+  for _, c in order(cols) do
+    a = auc(c)
+    if a then
+      nk = 0
+      for _, p in order(c) do if p[2] then nk = nk + 1 end end
+      tot, w   = tot + nk * a, w + nk
+      mac[#mac+1] = a end end
+  if #mac == 0 then return "0,0,0" end
+  sum = 0
+  for _, x in order(mac) do sum = sum + x end
+  return ("%.4f,%d,%.4f"):format(tot/w, #mac, sum/#mac) end
 
 -- ---- stats -----------------------------------------------------------
 function Same(xs,ys) --> SAME; sorted copies of two samples, ready
@@ -130,21 +188,20 @@ function bayes(tr,te,    nb,col,bag,trb) -- learn tr, guess all of te
   nb, col = Nb(trb, trb.rows), trb.klass
   for _, row in order(tr:clone(te.rows, "bin").rows) do
     bag:tally(row[col.at], nb:guess(row)) end
-  return ("%.1f,%.1f,%.1f,%.3f"):format(bag:score()) end
+  return Acc:format(bag:score()) end
 
-function bayesAuc(tr,te,    trb,nb,col,rows,post,t,sum,k,a) -- macro mean
+function bayesAuc(tr,te,    trb,nb,col,rows,post,t,cols) --> str
   trb     = tr:clone(tr.rows, "bin")
   nb, col = Nb(trb, trb.rows), trb.klass
   rows, post = tr:clone(te.rows, "bin").rows, {}
   for _, row in order(rows) do post[row] = nb:posts(row) end
-  sum, k = 0, 0
-  for x in pairs(nb.subs) do
+  cols = {}
+  for _, x in order(nb:klasses()) do        -- sorted, not `pairs`
     t = {}
     for _, row in order(rows) do
       t[#t + 1] = {post[row][x] or 0, row[col.at] == x} end
-    a = auc(t)
-    if a then sum, k = sum + a, k + 1 end end
-  return ("%.4f,%d"):format(k > 0 and sum / k or 0, k) end
+    cols[#cols + 1] = t end
+  return aucline(cols) end
 
 function goal(tbl,    col) --> fn; a `fn` that scores one `row`.  For
   col = (the.file or ""):find"/regression/"
@@ -243,10 +300,10 @@ function slow.report()                -- what the cache says
   versus("optimize",   "rmeans", "rmeansall", "rank", false) end
 
 function slow.nb()
-  print(scored(the.file, "nb", bayes, "acc,pd,pf,d2h")) end
+  print(scored(the.file, "nb", bayes, AccCols)) end
 
 function slow.nbauc()
-  print(scored(the.file, "nbauc", bayesAuc, "auc,klasses")) end
+  print(scored(the.file, "nbauc", bayesAuc, AucCols)) end
 
 function slow.rmeans()
   print(scored(the.file, "rmeans", rmeans, "rank,mae")) end
