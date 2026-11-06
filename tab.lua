@@ -12,7 +12,7 @@
 -- it will overwrite the module's `near` test helper.  Marked below.
 
 local rng
-local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, Code, Krow, NearC, FarC, codeKlass, clog, ent, sc, tally, sweepNum, sweepSym, hist, Hist, Rmeans, Nb, Tree, Forest, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
+local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, Code, Krow, ThisC, ThatC, codeKlass, clog, ent, sc, tally, sweepNum, sweepSym, hist, Hist, Rmeans, Nb, Tree, Forest, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
 
 the = { }
 help = [[tab: a good guess from a few dozen labels.
@@ -211,7 +211,7 @@ NUM.norm = function(self, v)
 end
 
 -- Offer `out` one cut between each pair of distinct sorted neighbours:
--- sort once, grow `near` left to right while `far` sheds the same.
+-- sort once, grow `this` left to right while `that` sheds the same.
 -- ---- tables ---------------------------------------------------------
 Tab = function(src)
   return adds(src, new(TAB, {
@@ -281,11 +281,11 @@ TAB.mid = function(self, cols)
 end
 
 TAB.ydist = function(self, row)
-  local fn
-  fn = function(col)
+  local on
+  on = function(col)
     return abs(col:norm(row[col.at]) - col.w) ^ the.p
   end
-  return (sum(self.y, fn) / #self.y) ^ (1 / the.p)
+  return (sum(self.y, on) / #self.y) ^ (1 / the.p)
 end
 
 TAB.split = function(self)
@@ -308,8 +308,8 @@ end
 -- ---- histogram cut ---------------------------------------------
 -- The same binned search, counted instead of accumulated.
 --
--- The search this replaced built a `Sym` for `near` and another for
--- `far` and walked every row through both; each `Sym.add` hashes a
+-- The search this replaced built a `Sym` for each side of a cut and
+-- walked every row through both; each `Sym.add` hashes a
 -- klass string and keeps an entropy cache -- `cl + c*log c` --
 -- current, so it spent a `log` per row per column per node.  The
 -- profile put 53% of a run in there, and the sort before it 55% of
@@ -324,7 +324,7 @@ end
 --
 -- Scratch shared by every column of a node: the klass codes, the
 -- (bin x klass) counts, and the two running klass tallies.
-Code, Krow, NearC, FarC = { }, { }, { }, { }
+Code, Krow, ThisC, ThatC = { }, { }, { }, { }
 
 -- The klasses as small integers, and how many distinct.  Done once a node
 -- and reused by every column it looks at, so no inner loop ever
@@ -415,11 +415,11 @@ ent = function(n, cl)
   return max(0, log(n) - cl / n)
 end
 
--- `n` rows split `near`/`far` score as their sizes weigh their
+-- `n` rows split `this`/`that` score as their sizes weigh their
 -- entropies -- the same quantity `TAB.cut` used to get from two
 -- `Sym`s, verified equal to `Sym.div` to 2.7e-15.
-sc = function(nn, ncl, fn, fcl)
-  return (ent(nn, ncl) * nn + ent(fn, fcl) * fn) / (log(2) * (nn + fn))
+sc = function(nn, tcl, on, ocl)
+  return (ent(nn, tcl) * nn + ent(on, ocl) * on) / (log(2) * (nn + on))
 end
 
 -- Count `rows` into (bin x klass); report the occupied span and how
@@ -441,19 +441,19 @@ tally = function(col, rows, nk, nb, lo, up, nn, k, b)
   return lo, up, nn
 end
 
--- NUMERIC: walk left to right, moving each bin's counts from `far`
--- to `near`, offering the cut that leaves behind.  `cl` is carried
+-- NUMERIC: walk left to right, moving each bin's counts from `that`
+-- side to `this` one, offering the cut that leaves behind.  `cl` is carried
 -- rather than rebuilt; old term off then new term on, in that order,
 -- because float addition is not associative and `(cl-a)+z` differs
 -- from `cl+(z-a)` by enough to flip a near-tie.
-sweepNum = function(col, nk, lo, up, nn, out, fn, ncl, fcl, b, i, c, a, z)
-  fn, nn, ncl, fcl = nn, 0, 0, 0
+sweepNum = function(col, nk, lo, up, nn, out, on, tcl, ocl, b, i, c, a, z)
+  on, nn, tcl, ocl = nn, 0, 0, 0
   for i = 1, nk do
-    NearC[i], FarC[i] = 0, 0
+    ThisC[i], ThatC[i] = 0, 0
     for b = lo, up do
-      FarC[i] = FarC[i] + Hist[(b - 1) * nk + i]
+      ThatC[i] = ThatC[i] + Hist[(b - 1) * nk + i]
     end
-    fcl = fcl + clog(FarC[i])
+    ocl = ocl + clog(ThatC[i])
   end
   for b = lo, up - 1 do
     for i = 1, nk do
@@ -461,43 +461,43 @@ sweepNum = function(col, nk, lo, up, nn, out, fn, ncl, fcl, b, i, c, a, z)
       if c == 0 then
         goto _continue_1
       end
-      a, z = clog(NearC[i]), clog(NearC[i] + c)
-      NearC[i], ncl = NearC[i] + c, ncl - a + z
-      a, z = clog(FarC[i]), clog(FarC[i] - c)
-      FarC[i], fcl = FarC[i] - c, fcl - a + z
-      nn, fn = nn + c, fn - c
+      a, z = clog(ThisC[i]), clog(ThisC[i] + c)
+      ThisC[i], tcl = ThisC[i] + c, tcl - a + z
+      a, z = clog(ThatC[i]), clog(ThatC[i] - c)
+      ThatC[i], ocl = ThatC[i] - c, ocl - a + z
+      nn, on = nn + c, on - c
       ::_continue_1::
     end
-    if nn < the.leaf or fn < the.leaf then
+    if nn < the.leaf or on < the.leaf then
       goto _continue_0
     end
-    out(sc(nn, ncl, fn, fcl), col:edge(b))
+    out(sc(nn, tcl, on, ocl), col:edge(b))
     ::_continue_0::
   end
 end
 
--- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `near` is one bin on
--- its own and `far` is everything else -- no carrying, and the bins
+-- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `this` is one bin on
+-- its own and `that` is everything else -- no carrying, and the bins
 -- need no order between them.
-sweepSym = function(col, nk, lo, up, nn, out, b, i, c, d, nnn, fnn, ncl, fcl)
+sweepSym = function(col, nk, lo, up, nn, out, b, i, c, d, tn, on, tcl, ocl)
   for i = 1, nk do
-    FarC[i] = 0
+    ThatC[i] = 0
     for b = lo, up do
-      FarC[i] = FarC[i] + Hist[(b - 1) * nk + i]
+      ThatC[i] = ThatC[i] + Hist[(b - 1) * nk + i]
     end
   end
   for b = lo, up do
-    nnn, fnn, ncl, fcl = 0, 0, 0, 0
+    tn, on, tcl, ocl = 0, 0, 0, 0
     for i = 1, nk do
       c = Hist[(b - 1) * nk + i]
-      d = FarC[i] - c
-      nnn, ncl = nnn + c, ncl + clog(c)
-      fnn, fcl = fnn + d, fcl + clog(d)
+      d = ThatC[i] - c
+      tn, tcl = tn + c, tcl + clog(c)
+      on, ocl = on + d, ocl + clog(d)
     end
-    if nnn < the.leaf or fnn < the.leaf then
+    if tn < the.leaf or on < the.leaf then
       goto _continue_0
     end
-    out(sc(nnn, ncl, fnn, fcl), col:edge(b))
+    out(sc(tn, tcl, on, ocl), col:edge(b))
     ::_continue_0::
   end
 end
@@ -559,11 +559,11 @@ Rmeans = function(tbl, rows, y)
       bins[b] = bins[b] or Num()
       bins[b]:add(y(row))
     end
-    local fn
-    fn = function(v)
+    local on
+    on = function(v)
       return v.n / i.all.n * (v:div() ^ 2)
     end
-    local w = (i.all:div() ^ 2) - sum(bins, fn)
+    local w = (i.all:div() ^ 2) - sum(bins, on)
     i.has[col.at] = {
       bins = bins,
       w = max(0, w)
@@ -622,8 +622,8 @@ NB.like = function(self, sub, row, cols)
   if cols == nil then
     cols = sub.x
   end
-  local fn
-  fn = function(col1, at)
+  local on
+  on = function(col1, at)
     local col, v = self.tbl.cols[col1.at], row[col1.at]
     if v == "?" then
       return 0
@@ -633,7 +633,7 @@ NB.like = function(self, sub, row, cols)
     return log(seen / all)
   end
   local prior = log((#sub.rows + the.m) / (self.n + the.m * self.nKlass))
-  return prior + sum(cols, fn)
+  return prior + sum(cols, on)
 end
 
 -- `pairs` has no order, so a klass tie used to fall whichever way
@@ -1010,35 +1010,35 @@ pick = function(t, n)
   return Drawn
 end
 
-map = function(t, fn)
+map = function(t, on)
   local u = { }
   for k, v in ipairs(t) do
-    u[#u + 1] = fn(v, k)
+    u[#u + 1] = on(v, k)
   end
   return u
 end
 
-sum = function(t, fn)
+sum = function(t, on)
   local n = 0
   for k, v in pairs(t) do
-    n = n + fn(v, k)
+    n = n + on(v, k)
   end
   return n
 end
 
-adds = function(src, it, fn)
+adds = function(src, it, on)
   it = it or Num()
-  fn = fn or same
+  on = on or same
   for _, x in order(src) do
-    it:add(fn(x))
+    it:add(on(x))
   end
   return it
 end
 
-best = function(t, fn)
+best = function(t, on)
   local n, m, u
   for k, v in pairs(t) do
-    m = fn(v, k)
+    m = on(v, k)
     if not n or m > n then
       n, u = m, k
     end
@@ -1053,25 +1053,25 @@ lt = function(a, b)
   return a < b
 end
 
-sort = function(t, fn)
-  if fn and type(fn) ~= "function" then
-    local k = fn
-    fn = function(a, b)
+sort = function(t, on)
+  if on and type(on) ~= "function" then
+    local k = on
+    on = function(a, b)
       return a[k] < b[k]
     end
   end
-  table.sort(t, fn)
+  table.sort(t, on)
   return t
 end
 
-order = function(t, fn)
+order = function(t, on)
   if type(t) == "string" then
     t = csv(t)
   end
-  if not fn then
+  if not on then
     return ipairs(t)
   end
-  return ipairs(sort(map(t, same), fn))
+  return ipairs(sort(map(t, same), on))
 end
 
 o = function(x)

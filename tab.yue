@@ -153,7 +153,7 @@ NUM.norm = (v) =>                 -- value; `v` on a logistic cdf,
   1 / (1 + exp(-1.7 * z))
 
 -- Offer `out` one cut between each pair of distinct sorted neighbours:
--- sort once, grow `near` left to right while `far` sheds the same.
+-- sort once, grow `this` left to right while `that` sheds the same.
 -- ---- tables ---------------------------------------------------------
 Tab = (src) ->                    -- TAB from `src`: a file name, or rows
   adds src, new(TAB, {rows: {}, names: {}, cols: {}, x: {}, y: {}})
@@ -193,8 +193,8 @@ TAB.mid = (cols) =>               -- dict; {name: middle}, for logfmt
   u
 
 TAB.ydist = (row) =>              -- num; `row`'s distance to heaven
-  fn = (col) -> abs(col\norm(row[col.at]) - col.w) ^ the.p
-  (sum(@y, fn) / #@y) ^ (1 / the.p)
+  on = (col) -> abs(col\norm(row[col.at]) - col.w) ^ the.p
+  (sum(@y, on) / #@y) ^ (1 / the.p)
 
 TAB.split = =>                    -- rows,rows; 80:20, off a copy:
   rows = shuffle map(@rows, same) -- never @rows itself
@@ -212,8 +212,8 @@ TAB.split = =>                    -- rows,rows; 80:20, off a copy:
 -- ---- histogram cut ---------------------------------------------
 -- The same binned search, counted instead of accumulated.
 --
--- The search this replaced built a `Sym` for `near` and another for
--- `far` and walked every row through both; each `Sym.add` hashes a
+-- The search this replaced built a `Sym` for each side of a cut and
+-- walked every row through both; each `Sym.add` hashes a
 -- klass string and keeps an entropy cache -- `cl + c*log c` --
 -- current, so it spent a `log` per row per column per node.  The
 -- profile put 53% of a run in there, and the sort before it 55% of
@@ -228,7 +228,7 @@ TAB.split = =>                    -- rows,rows; 80:20, off a copy:
 --
 -- Scratch shared by every column of a node: the klass codes, the
 -- (bin x klass) counts, and the two running klass tallies.
-Code, Krow, NearC, FarC = {}, {}, {}, {}
+Code, Krow, ThisC, ThatC = {}, {}, {}, {}
 
 -- The klasses as small integers, and how many distinct.  Done once a node
 -- and reused by every column it looks at, so no inner loop ever
@@ -291,11 +291,11 @@ clog = (c) -> c > 0 and c * log(c) or 0
 -- `/log 2` comes out once, in the score.
 ent = (n, cl) -> max 0, log(n) - cl / n
 
--- `n` rows split `near`/`far` score as their sizes weigh their
+-- `n` rows split `this`/`that` score as their sizes weigh their
 -- entropies -- the same quantity `TAB.cut` used to get from two
 -- `Sym`s, verified equal to `Sym.div` to 2.7e-15.
-sc = (nn, ncl, fn, fcl) ->
-  (ent(nn, ncl) * nn + ent(fn, fcl) * fn) / (log(2) * (nn + fn))
+sc = (nn, tcl, on, ocl) ->
+  (ent(nn, tcl) * nn + ent(on, ocl) * on) / (log(2) * (nn + on))
 
 -- Count `rows` into (bin x klass); report the occupied span and how
 -- many rows landed.  The span keeps a four-row leaf from sweeping
@@ -311,47 +311,47 @@ tally = (col, rows, nk, nb,    lo,up,nn,k,b) -> --> int,int,int
       lo, up, nn = min(lo, b), max(up, b), nn + 1
   lo, up, nn
 
--- NUMERIC: walk left to right, moving each bin's counts from `far`
--- to `near`, offering the cut that leaves behind.  `cl` is carried
+-- NUMERIC: walk left to right, moving each bin's counts from `that`
+-- side to `this` one, offering the cut that leaves behind.  `cl` is carried
 -- rather than rebuilt; old term off then new term on, in that order,
 -- because float addition is not associative and `(cl-a)+z` differs
 -- from `cl+(z-a)` by enough to flip a near-tie.
-sweepNum = (col, nk, lo, up, nn, out,    fn,ncl,fcl,b,i,c,a,z) -> --> nil
-  fn, nn, ncl, fcl = nn, 0, 0, 0
-  for i = 1, nk                    -- `far` starts holding every row
-    NearC[i], FarC[i] = 0, 0
+sweepNum = (col, nk, lo, up, nn, out,    on,tcl,ocl,b,i,c,a,z) -> --> nil
+  on, nn, tcl, ocl = nn, 0, 0, 0
+  for i = 1, nk                    -- `that` holds every row at first
+    ThisC[i], ThatC[i] = 0, 0
     for b = lo, up
-      FarC[i] += Hist[(b - 1) * nk + i]
-    fcl += clog FarC[i]
+      ThatC[i] += Hist[(b - 1) * nk + i]
+    ocl += clog ThatC[i]
   for b = lo, up - 1               -- a cut after the last bin would
-    for i = 1, nk                  -- leave `far` empty
+    for i = 1, nk                  -- leave `that` empty
       c = Hist[(b - 1) * nk + i]
       continue if c == 0
-      a, z = clog(NearC[i]), clog(NearC[i] + c)
-      NearC[i], ncl = NearC[i] + c, ncl - a + z
-      a, z = clog(FarC[i]), clog(FarC[i] - c)
-      FarC[i], fcl = FarC[i] - c, fcl - a + z
-      nn, fn = nn + c, fn - c
-    continue if nn < the.leaf or fn < the.leaf
-    out sc(nn, ncl, fn, fcl), col\edge b
+      a, z = clog(ThisC[i]), clog(ThisC[i] + c)
+      ThisC[i], tcl = ThisC[i] + c, tcl - a + z
+      a, z = clog(ThatC[i]), clog(ThatC[i] - c)
+      ThatC[i], ocl = ThatC[i] - c, ocl - a + z
+      nn, on = nn + c, on - c
+    continue if nn < the.leaf or on < the.leaf
+    out sc(nn, tcl, on, ocl), col\edge b
 
--- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `near` is one bin on
--- its own and `far` is everything else -- no carrying, and the bins
+-- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `this` is one bin on
+-- its own and `that` is everything else -- no carrying, and the bins
 -- need no order between them.
-sweepSym = (col, nk, lo, up, nn, out,    b,i,c,d,nnn,fnn,ncl,fcl) -> --> nil
+sweepSym = (col, nk, lo, up, nn, out,    b,i,c,d,tn,on,tcl,ocl) -> --> nil
   for i = 1, nk
-    FarC[i] = 0
+    ThatC[i] = 0
     for b = lo, up
-      FarC[i] += Hist[(b - 1) * nk + i]
+      ThatC[i] += Hist[(b - 1) * nk + i]
   for b = lo, up
-    nnn, fnn, ncl, fcl = 0, 0, 0, 0
+    tn, on, tcl, ocl = 0, 0, 0, 0
     for i = 1, nk
       c = Hist[(b - 1) * nk + i]
-      d = FarC[i] - c
-      nnn, ncl = nnn + c, ncl + clog c
-      fnn, fcl = fnn + d, fcl + clog d
-    continue if nnn < the.leaf or fnn < the.leaf
-    out sc(nnn, ncl, fnn, fcl), col\edge b
+      d = ThatC[i] - c
+      tn, tcl = tn + c, tcl + clog c
+      on, ocl = on + d, ocl + clog d
+    continue if tn < the.leaf or on < the.leaf
+    out sc(tn, tcl, on, ocl), col\edge b
 
 -- One column, counted and swept.  The only thing the two kinds still
 -- disagree about is what a cut MEANS, which is the sweep.
@@ -394,8 +394,8 @@ Rmeans = (tbl, rows, y) ->        -- RMEANS; per x column, its bins' y
       b = col\bin row[col.at]
       bins[b] = bins[b] or Num!
       bins[b]\add y(row)
-    fn = (v) -> v.n / i.all.n * (v\div! ^ 2)
-    w = (i.all\div! ^ 2) - sum(bins, fn)
+    on = (v) -> v.n / i.all.n * (v\div! ^ 2)
+    w = (i.all\div! ^ 2) - sum(bins, on)
     i.has[col.at] = {bins: bins, w: max(0, w)}
   i
 
@@ -431,14 +431,14 @@ Nb = (tbl, rows) ->               -- NB; one sub-TAB per klass in `rows`
 -- one iteration order; indexing `@tbl.x[at]` would have needed the
 -- subset to stay sparse and be walked by `pairs`.
 NB.like = (sub, row, cols = sub.x) =>   -- num; log P(`row` | `sub:TAB`)
-  fn = (col1, at) ->
+  on = (col1, at) ->
     col, v = @tbl.cols[col1.at], row[col1.at]  -- col knows every value;
     return 0 if v == "?"                -- col1 knows this klass's
     seen = (col1.has[v] or 0) + the.m   -- and m per value
     all = col1.n + the.m * col\nVals!
     log(seen / all)
   prior = log((#sub.rows + the.m) / (@n + the.m * @nKlass))  -- m/klass
-  prior + sum(cols, fn)
+  prior + sum(cols, on)
 
 -- `pairs` has no order, so a klass tie used to fall whichever way
 -- the hash happened to lie.  Sort the keys once and every tie after
@@ -704,46 +704,46 @@ pick = (t, n) ->
     Drawn[k] = nil
   Drawn
 
-map = (t, fn) ->                  -- list; `fn(v,k)` over `t`, nils dropped
+map = (t, on) ->                  -- list; `on(v,k)` over `t`, nils dropped
   u = {}
   for k, v in ipairs t
-    u[#u + 1] = fn(v, k)
+    u[#u + 1] = on(v, k)
   u
 
-sum = (t, fn) ->                  -- num; `fn(v,k)` over every item, added
+sum = (t, on) ->                  -- num; `on(v,k)` over every item, added
   n = 0
   for k, v in pairs t
-    n += fn(v, k)
+    n += on(v, k)
   n
 
-adds = (src, it, fn) ->           -- it; `fn(x)` for x in `src`, added to
+adds = (src, it, on) ->           -- it; `on(x)` for x in `src`, added to
   it or= Num!                     -- `it` (a fresh Num, by default)
-  fn or= same
+  on or= same
   for _, x in order src
-    it\add fn(x)
+    it\add on(x)
   it
 
-best = (t, fn) ->                 -- any,num; key of `t` with the biggest
-  local n, m, u                   -- `fn(v,k)`, and that score
+best = (t, on) ->                 -- any,num; key of `t` with the biggest
+  local n, m, u                   -- `on(v,k)`, and that score
   for k, v in pairs t
-    m = fn(v, k)
+    m = on(v, k)
     n, u = m, k if not n or m > n
   u, n
 
 same = (x) -> x
 lt = (a, b) -> a < b
 
-sort = (t, fn) ->                 -- list; `t` sorted in place, ascending
-  if fn and type(fn) != "function"      -- `fn`: comparator, or a key
-    k = fn
-    fn = (a, b) -> a[k] < b[k]
-  table.sort t, fn
+sort = (t, on) ->                 -- list; `t` sorted in place, ascending
+  if on and type(on) != "function"      -- `on`: comparator, or a key
+    k = on
+    on = (a, b) -> a[k] < b[k]
+  table.sort t, on
   t
 
-order = (t, fn) ->                -- fun; `ipairs(t)` (or of a sorted
-  t = csv(t) if type(t) == "string"   -- copy, given `fn`); a string `t`
-  return ipairs(t) unless fn          -- means rows of a csv
-  ipairs sort(map(t, same), fn)
+order = (t, on) ->                -- fun; `ipairs(t)` (or of a sorted
+  t = csv(t) if type(t) == "string"   -- copy, given `on`); a string `t`
+  return ipairs(t) unless on          -- means rows of a csv
+  ipairs sort(map(t, same), on)
 
 o = (x) ->                        -- str; `x` as text, fractions through
   if type(x) != "table"           -- `the.fmt`
