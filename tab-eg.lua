@@ -54,8 +54,8 @@ function scored(file,who,fun,what,    dir,f,h,tbl,t0,line,ok) -- once
 -- ---- scoring ---------------------------------------------------------
 -- The two score headers, named once, so an arm cannot write a column
 -- order its reader does not expect.
-Acc     = "%.1f,%.1f,%.1f,%.3f,%.1f,%.1f,%.3f"
-AccCols = "acc,pd,pf,d2h,macropd,macropf,macrod2h"
+Acc     = "%.1f,%.1f,%.1f,%.3f,%.1f,%.1f,%.3f,%d"
+AccCols = "acc,pd,pf,d2h,macropd,macropf,macrod2h,klasses"
 AucCols = "auc,klasses,macroauc"
 
 -- ---- (scoring) ---------------------------------------------------------
@@ -75,10 +75,16 @@ function BAG.parts(i,x,    tp,fp,fn) --> int; klass `x:value`'s tp, fp, fn
   fn = (i.want[x] or 0) - tp
   return tp, fp, fn, i.n - fn - fp - tp end
 
+-- `fp + tn` is `i.n - i.want[x]`, so it is zero exactly when every test
+-- row is klass `x`.  Then `x` has no negatives, there is no false alarm
+-- rate to report, and `pf` and the `d2h` built on it come back nil --
+-- not zero, which would score a measurement that does not exist as a
+-- perfect one.  `pd` is still fine: it only needs positives.
 function BAG.score1(i,x,    tp,fp,fn,tn,r1,f1) --> num; klass `x:value`'s
   tp, fp, fn, tn = i:parts(x)
   r1 = tp / (tp + fn)
-  f1 = fp + tn > 0 and fp / (fp + tn) or 0
+  if fp + tn == 0 then return r1 end
+  f1 = fp / (fp + tn)
   return r1, f1, sqrt((1 - r1) ^ 2 + f1 ^ 2) / sqrt(2) end
 
 function BAG.klasses(i) return keys(i.want) end --> list; sorted, so
@@ -97,13 +103,24 @@ function BAG.klasses(i) return keys(i.want) end --> list; sorted, so
 -- sum_x tp_x / n, so the two agree by construction, not by luck of
 -- this data.  Reported anyway, so `pd` means one thing in every
 -- column of every chart and the identity is on the page.
+--
+-- The klass count is reported last, and it is the reader's sentinel for
+-- the `pf` and `d2h` columns: a one-klass test split leaves every klass
+-- without negatives, so those four columns are written 0 and mean
+-- nothing.  Gate on `klasses > 1` before using them -- the same bargain
+-- `AucCols` already makes with its own `klasses`.  It is all or nothing:
+-- the guard in `score1` fires for klass `x` only when `x` is the whole
+-- test set, which no second klass can survive.  So the weighted sums
+-- below still divide by `i.n`.
 function BAG.score(i,    k,pd,pf,d2h,wd,wf,wh,w,r1,f1,d1) --> num
   k, pd, pf, d2h, wd, wf, wh = 0, 0, 0, 0, 0, 0, 0
   for _, x in order(i:klasses()) do
     r1, f1, d1 = i:score1(x)
     w          = i.want[x]
-    k, pd, pf, d2h = k + 1, pd + r1, pf + f1, d2h + d1
-    wd, wf, wh     = wd + w*r1, wf + w*f1, wh + w*d1 end
+    k, pd, wd  = k + 1, pd + r1, wd + w*r1
+    if f1 then
+      pf, d2h = pf + f1, d2h + d1
+      wf, wh  = wf + w*f1, wh + w*d1 end end
   return 100*i.ok/i.n, 100*wd/i.n, 100*wf/i.n, wh/i.n,
          100*pd/k, 100*pf/k, d2h/k, k end
 

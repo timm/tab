@@ -12,7 +12,7 @@
 -- it will overwrite the module's `near` test helper.  Marked below.
 
 local rng
-local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, Code, Krow, ThisC, ThatC, codeKlass, clog, ent, sc, tally, sweepNum, sweepSym, hist, Hist, Rmeans, Nb, Tree, Forest, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
+local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, Code, Krow, ThisC, ThatC, Hist, codeKlass, clog, ent, sc, tally, sweepNum, sweepSym, hist, Rmeans, Nb, Tree, Forest, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
 
 the = { }
 help = [[tab: a good guess from a few dozen labels.
@@ -322,9 +322,22 @@ end
 -- holds.  For 1000 rows and 2 klasses that is ~3000 `log` calls
 -- replaced by a few hundred.
 --
--- Scratch shared by every column of a node: the klass codes, the
--- (bin x klass) counts, and the two running klass tallies.
-Code, Krow, ThisC, ThatC = { }, { }, { }, { }
+-- Scratch, hoisted out of the search and reused.  These hold no
+-- answers: they are buffers, kept at module level so a node pays for
+-- them once a run instead of once a column.  That is the whole
+-- speedup -- the old search was 45% garbage collection, and a fresh
+-- table per column per node of a 30-tree forest was the garbage.
+--
+-- Nothing here outlives a node, and each is cleared by its own writer
+-- before use.  `Krow` is the only one two readers share, and they are
+-- the columns of ONE node.  Lifetimes, shortest first: `Hist`,
+-- `ThisC` and `ThatC` last one column; `Code` and `Krow` one node.
+--
+-- The price is that the search must not reenter itself: one `cut` has
+-- to finish before the next begins, or these four quietly corrupt.
+-- `TREE.grow` obeys that -- it takes its cut, then recurses -- and a
+-- threaded forest would not.
+Code, Krow, ThisC, ThatC, Hist = { }, { }, { }, { }, { }
 
 -- The klasses as small integers, and how many distinct.  Done once a node
 -- and reused by every column it looks at, so no inner loop ever
@@ -516,7 +529,6 @@ hist = function(col, rows, ks, nk, out, nb, lo, up, nn)
   return (col.it == NUM and sweepNum or sweepSym)(col, nk, lo, up, nn, out)
 end
 
-Hist = { }
 -- The cut of `rows` that leaves the least klass entropy, found by
 -- counting.  `tab` grows trees over klasses only -- regression is
 -- `Rmeans`' job -- so every target is a `Sym` and both column kinds
