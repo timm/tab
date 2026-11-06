@@ -28,7 +28,7 @@ flags:
   budget=50        labels, all in
   check=5          of those, saved for the test rows
   fmt=%.2f         how a fraction is printed
-  cuts=51          candidate cuts per numeric column
+  cuts=50          bins per numeric column (rounded up to odd)
   depth=12         how deep a tree may grow
   leaf=2           rows each side of a cut needs
   m=2              m-estimate: prior weight for a thin bin
@@ -232,33 +232,15 @@ TAB.split = =>                    -- rows,rows; 80:20, off a copy:
 -- speedup -- the old search was 45% garbage collection, and a fresh
 -- table per column per node of a 30-tree forest was the garbage.
 --
--- Nothing here outlives a node, and each is cleared by its own writer
--- before use.  `Krow` is the only one two readers share, and they are
--- the columns of ONE node.  Lifetimes, shortest first: `Hist`,
--- `ThisC` and `ThatC` last one column; `Code` and `Krow` one node.
+-- Nothing here outlives one column, and each is cleared by its own
+-- writer before use.
 --
 -- The price is that the search must not reenter itself: one `cut` has
--- to finish before the next begins, or these four quietly corrupt.
+-- to finish before the next begins, or these three quietly corrupt.
 -- `TREE.grow` obeys that -- it takes its cut, then recurses -- and a
 -- threaded forest would not.
-Code, Krow, ThisC, ThatC, Hist = {}, {}, {}, {}, {}
+ThisC, ThatC, Hist = {}, {}, {}
 
--- The klasses as small integers, and how many distinct.  Done once a node
--- and reused by every column it looks at, so no inner loop ever
--- hashes a klass string.
-codeKlass = (ks,    k,n,v,c) -> --> int
-  for v in pairs Code
-    Code[v] = nil
-  n = 0
-  for k = 1, #ks
-    v = ks[k]
-    c = Code[v]
-    unless c
-      n += 1
-      Code[v] = n
-      c = n
-    Krow[k] = c
-  n
 
 -- ---- binning, on the column itself --------------------------------
 -- A column knows its own bins.  `slot` puts a value in one, `edge`
@@ -267,7 +249,12 @@ codeKlass = (ks,    k,n,v,c) -> --> int
 -- already keeps, so they are computed once and then shared by every
 -- tree and every node of the ensemble -- which is the whole trick:
 -- nothing is sorted, and nothing is re-derived per node.
-NUM.slots = => the.cuts
+-- The count is forced odd: `slot` clamps to `-hi..hi` and shifts, so
+-- there are always `2*hi+1` bins -- one centred on the mean, `hi` to
+-- each side.  `slots` must report that, not `the.cuts`, or the bin a
+-- 3sd outlier pins to falls outside the range `tally` clears and
+-- picks up a stale count.  `cuts=50` and `cuts=51` are the same 51.
+NUM.slots = => 2 * floor(the.cuts / 2) + 1
 NUM.edge  = (b) => @mu + (b - @hi - 0.5) * @r
 NUM.slot  = (x) =>                 -- nil when there is nothing to cut
   unless @r
@@ -310,17 +297,57 @@ ent = (n, cl) -> max 0, log(n) - cl / n
 sc = (nn, tcl, on, ocl) ->
   (ent(nn, tcl) * nn + ent(on, ocl) * on) / (log(2) * (nn + on))
 
+-- Bin every x value of `tbl` once and keep the id past the end of the
+-- row.  A bin id is a function of (row, column) alone -- it does not
+-- depend on which rows a node happens to hold -- and `Forest` hands
+-- all its trees the same tbl and the same row tables.  Without this,
+-- one id is recomputed 34 to 71 times a build (measured, four sets).
+-- With it, `tally`'s inner loop is an add and a read: no method
+-- dispatch, no arithmetic, and no NUM/SYM branch.
+--
+-- Two things make writing into the row safe.  Nothing anywhere reads
+-- `#row`, so the extra cells are invisible to the rest of the code;
+-- and `clone` builds a fresh TAB, so `binAt` belongs to this table.
+-- The ROWS, though, are shared with whatever table they came from:
+-- two tables binning the same rows would write the same slots and the
+-- last would win.  Hence one entry point, `TAB.cut`, and a guard --
+-- and hence `tbl.rows`, not a node's subset, which is also what makes
+-- it once a run rather than once a node.
+-- The klass rides along, for the same reason and in the same place:
+-- the search wants it as a small int, and a node that read the string
+-- would hash it once per row per column.  Its slot is free -- the
+-- klass is a y column, so no x column claims `off + klass.at`.
+-- `kodes` is the way back, which `mid` and `posts` still need.
+binRows = (tbl): nil ->
+  return if tbl.binned
+  tbl.binned = true
+  off = #tbl.cols
+  for col in *tbl.x
+    col.binAt = off + col.at
+    for row in *tbl.rows
+      row[col.binAt] = col\slot row[col.at]
+  tbl.kodeAt, tbl.kodes, tbl.nk = off + tbl.klass.at, {}, 0
+  seen = {}
+  for row in *tbl.rows
+    v = row[tbl.klass.at]
+    unless seen[v]
+      tbl.nk += 1
+      seen[v] = tbl.nk
+      tbl.kodes[tbl.nk] = v
+    row[tbl.kodeAt] = seen[v]
+
 -- Count `rows` into (bin x klass); report the occupied span and how
 -- many rows landed.  The span keeps a four-row leaf from sweeping
 -- fifty-one bins.
-tally = (col, rows, nk, nb,    lo,up,nn,k,b) -> --> int,int,int
+tally = (col, rows, kat, nk, nb,    lo,up,nn,k,b,at) -> --> int,int,int
   for k = 1, nb * nk
     Hist[k] = 0
   lo, up, nn = nb + 1, 0, 0
-  for k, row in order rows
-    b = col\slot row[col.at]
+  at = col.binAt
+  for _, row in order rows
+    b = row[at]
     if b
-      Hist[(b - 1) * nk + Krow[k]] += 1
+      Hist[(b - 1) * nk + row[kat]] += 1
       lo, up, nn = min(lo, b), max(up, b), nn + 1
   lo, up, nn
 
@@ -329,7 +356,7 @@ tally = (col, rows, nk, nb,    lo,up,nn,k,b) -> --> int,int,int
 -- rather than rebuilt; old term off then new term on, in that order,
 -- because float addition is not associative and `(cl-a)+z` differs
 -- from `cl+(z-a)` by enough to flip a near-tie.
-sweepNum = (col, nk, lo, up, nn, out,    on,tcl,ocl,b,i,c,a,z) -> --> nil
+NUM.sweep = (nk, lo, up, nn, out,    on,tcl,ocl,b,i,c,a,z): nil =>
   on, nn, tcl, ocl = nn, 0, 0, 0
   for i = 1, nk                    -- `that` holds every row at first
     ThisC[i], ThatC[i] = 0, 0
@@ -346,12 +373,12 @@ sweepNum = (col, nk, lo, up, nn, out,    on,tcl,ocl,b,i,c,a,z) -> --> nil
       ThatC[i], ocl = ThatC[i] - c, ocl - a + z
       nn, on = nn + c, on - c
     continue if nn < the.leaf or on < the.leaf
-    out sc(nn, tcl, on, ocl), col\edge b
+    out sc(nn, tcl, on, ocl), @edge b
 
 -- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `this` is one bin on
 -- its own and `that` is everything else -- no carrying, and the bins
 -- need no order between them.
-sweepSym = (col, nk, lo, up, nn, out,    b,i,c,d,tn,on,tcl,ocl) -> --> nil
+SYM.sweep = (nk, lo, up, nn, out,    b,i,c,d,tn,on,tcl,ocl): nil =>
   for i = 1, nk
     ThatC[i] = 0
     for b = lo, up
@@ -364,16 +391,23 @@ sweepSym = (col, nk, lo, up, nn, out,    b,i,c,d,tn,on,tcl,ocl) -> --> nil
       tn, tcl = tn + c, tcl + clog c
       on, ocl = on + d, ocl + clog d
     continue if tn < the.leaf or on < the.leaf
-    out sc(tn, tcl, on, ocl), col\edge b
+    out sc(tn, tcl, on, ocl), @edge b
 
 -- One column, counted and swept.  The only thing the two kinds still
--- disagree about is what a cut MEANS, which is the sweep.
-hist = (col, rows, ks, nk, out,    nb,lo,up,nn) -> --> nil
+-- disagree about is what a cut MEANS, so that is the one thing the
+-- column is asked: `slots`, `slot`, `edge` and `sweep` all dispatch on
+-- it, and nothing here tests which kind it is.
+--
+-- The counting stays a plain function.  `NUM` and `SYM` are two
+-- metatables with no parent -- `Col` picks between them, it is not a
+-- base class -- so a shared prologue has nowhere polymorphic to live,
+-- and giving it the name `hist` on both would mean copying it twice.
+hist = (col, rows, kat, nk, out,    nb,lo,up,nn) -> --> nil
   nb = col\slots!
   return unless nb and nb > 1
-  lo, up, nn = tally col, rows, nk, nb
+  lo, up, nn = tally col, rows, kat, nk, nb
   return if nn < 2 * the.leaf or lo >= up
-  (col.it == NUM and sweepNum or sweepSym) col, nk, lo, up, nn, out
+  col\sweep nk, lo, up, nn, out
 
 
 -- The cut of `rows` that leaves the least klass entropy, found by
@@ -382,16 +416,16 @@ hist = (col, rows, ks, nk, out,    nb,lo,up,nn) -> --> nil
 -- reduce to the same histogram: bin the column, count (bin x klass),
 -- sweep the boundaries.  Nothing is sorted and nothing is
 -- accumulated into a `Sym`, which is where the time used to go.
-TAB.cut = (rows, ks, cols) =>
+TAB.cut = (rows, cols) =>
   local col1                      -- `local`: `offer` closes over it
   local bs, bc, bv                -- and each column rebinds it
   offer = (score, v) ->
     if bs == nil or score < bs    -- strict `<` keeps the FIRST of a
       bs, bc, bv = score, col1, v -- tie
-  nk = codeKlass ks                  -- klass strings -> ints, once a node
+  binRows @              -- bins and klass codes: once a run, not a node
   for _, col in order pick(@x, cols)   -- `cols`=0: all of them
     col1 = col
-    hist col, rows, ks, nk, offer
+    hist col, rows, @kodeAt, @nk, offer
   bs and {col: bc, v: bv}
 
 -- ---- rmeans ---------------------------------------------------------
@@ -495,27 +529,19 @@ NB.posts = (row) =>               -- dict; p(klass | `row`)
 -- tree so every node redraws its own few.
 -- `tab` grows trees over a KLASS only; regression is `Rmeans`' job,
 -- and a tree whose target is a distance has no entropy to count.
-Tree = (tbl, rows, y, Y, lvl, cols) ->
+Tree = (tbl, rows, lvl, cols) ->
   rows or= tbl.rows
-  y or= (row) -> row[tbl.klass.at]
-  Y or= Sym
-  node = new TREE, {tbl: tbl, rows: rows, y: y, Y: Y, lvl: lvl or 1,
-                    cols: cols or 0, n: #rows, ks: {}, txt: ""}
+  node = new TREE, {tbl: tbl, rows: rows, lvl: lvl or 1,
+                    cols: cols or 0, n: #rows, txt: ""}
   node\sum!\grow!
 
--- What this node answers with: `@ks` (one klass per row), `@all`
--- (those klasses, summarized) and `@mid` (their majority).
--- `mk` and `fy` are not decoration.  `@Y` and `@y` hold plain
--- functions, not methods, and yue compiles `@Y!` to `self:Y()` and
--- `@y row` to `self:y(row)` -- it passes the node in as the first
--- argument.  `Num` would read it as `txt` and call `txt:find`.  Bind
--- the field to a local first and the call stays a plain call.
-TREE.sum = (    fy,v) =>
-  @all, fy = @Y!, @y
+-- What this node answers with: `@all` (its rows' klasses, summarized)
+-- and `@mid` (their majority).  Both are wanted by a leaf that has to
+-- vote, so both survive the search caching klass codes on the rows.
+TREE.sum = (    at) =>
+  @all, at = Sym!, @tbl.klass.at
   for _, row in order @rows
-    v = fy row
-    @ks[row] = v
-    @all\add v
+    @all\add row[at]
   @mid = @all\mid!                -- the majority klass
   @
 
@@ -531,17 +557,15 @@ TREE.grow = =>
       t[#t + 1] = row
     if #a >= the.leaf and #b >= the.leaf     -- else, a bad cut
       @at = cut
-      @left = Tree(@tbl, a, @y, @Y, @lvl + 1, @cols)
-      @right = Tree(@tbl, b, @y, @Y, @lvl + 1, @cols)
+      @left = Tree(@tbl, a, @lvl + 1, @cols)
+      @right = Tree(@tbl, b, @lvl + 1, @cols)
       op = cut.col.it == SYM and {"==", "~="} or {"<=", ">"}
       @left.txt = cut.col.txt .. " " .. op[1] .. " " .. o(cut.v)
       @right.txt = cut.col.txt .. " " .. op[2] .. " " .. o(cut.v)
   @
 
 TREE.cut = =>                     -- dict; the cut of `@rows` leaving
-  ks = map @rows, (row) -> @ks[row]        -- least klass entropy
-  won = @tbl\cut(@rows, ks, @cols)
-  won
+  @tbl\cut(@rows, @cols)                   -- least klass entropy
 
 -- A TAB of just `@rows`, so `ycols` and `dict` can report what this
 -- node's y columns look like.  Cloning is the costliest thing a node
@@ -623,8 +647,7 @@ Forest = (tbl, rows, rounds) ->
   c = max(1, floor(sqrt(#tbl.x)))
   i = new FOREST, {all: {}, tbl: tbl}
   for k = 1, rounds or the.rounds
-    i.all[k] = Tree(tbl, some(rows, #rows),
-                    ((row) -> row[tbl.klass.at]), Sym, 1, c)
+    i.all[k] = Tree(tbl, some(rows, #rows), 1, c)
   i
 
 -- A HARD vote: each tree offers one label -- its leaf's majority --

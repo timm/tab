@@ -12,7 +12,7 @@
 -- it will overwrite the module's `near` test helper.  Marked below.
 
 local rng
-local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, Code, Krow, ThisC, ThatC, Hist, codeKlass, clog, ent, sc, tally, sweepNum, sweepSym, hist, Rmeans, Nb, Tree, Forest, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
+local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, ThisC, ThatC, Hist, clog, ent, sc, binRows, tally, hist, Rmeans, Nb, Tree, Forest, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
 
 the = { }
 help = [[tab: a good guess from a few dozen labels.
@@ -27,7 +27,7 @@ flags:
   budget=50        labels, all in
   check=5          of those, saved for the test rows
   fmt=%.2f         how a fraction is printed
-  cuts=51          candidate cuts per numeric column
+  cuts=50          bins per numeric column (rounded up to odd)
   depth=12         how deep a tree may grow
   leaf=2           rows each side of a cut needs
   m=2              m-estimate: prior weight for a thin bin
@@ -328,37 +328,14 @@ end
 -- speedup -- the old search was 45% garbage collection, and a fresh
 -- table per column per node of a 30-tree forest was the garbage.
 --
--- Nothing here outlives a node, and each is cleared by its own writer
--- before use.  `Krow` is the only one two readers share, and they are
--- the columns of ONE node.  Lifetimes, shortest first: `Hist`,
--- `ThisC` and `ThatC` last one column; `Code` and `Krow` one node.
+-- Nothing here outlives one column, and each is cleared by its own
+-- writer before use.
 --
 -- The price is that the search must not reenter itself: one `cut` has
--- to finish before the next begins, or these four quietly corrupt.
+-- to finish before the next begins, or these three quietly corrupt.
 -- `TREE.grow` obeys that -- it takes its cut, then recurses -- and a
 -- threaded forest would not.
-Code, Krow, ThisC, ThatC, Hist = { }, { }, { }, { }, { }
-
--- The klasses as small integers, and how many distinct.  Done once a node
--- and reused by every column it looks at, so no inner loop ever
--- hashes a klass string.
-codeKlass = function(ks, k, n, v, c)
-  for v in pairs(Code) do
-    Code[v] = nil
-  end
-  n = 0
-  for k = 1, #ks do
-    v = ks[k]
-    c = Code[v]
-    if not c then
-      n = n + 1
-      Code[v] = n
-      c = n
-    end
-    Krow[k] = c
-  end
-  return n
-end
+ThisC, ThatC, Hist = { }, { }, { }
 
 -- ---- binning, on the column itself --------------------------------
 -- A column knows its own bins.  `slot` puts a value in one, `edge`
@@ -367,8 +344,13 @@ end
 -- already keeps, so they are computed once and then shared by every
 -- tree and every node of the ensemble -- which is the whole trick:
 -- nothing is sorted, and nothing is re-derived per node.
+-- The count is forced odd: `slot` clamps to `-hi..hi` and shifts, so
+-- there are always `2*hi+1` bins -- one centred on the mean, `hi` to
+-- each side.  `slots` must report that, not `the.cuts`, or the bin a
+-- 3sd outlier pins to falls outside the range `tally` clears and
+-- picks up a stale count.  `cuts=50` and `cuts=51` are the same 51.
 NUM.slots = function(self)
-  return the.cuts
+  return 2 * floor(the.cuts / 2) + 1
 end
 NUM.edge = function(self, b)
   return self.mu + (b - self.hi - 0.5) * self.r
@@ -435,18 +417,72 @@ sc = function(nn, tcl, on, ocl)
   return (ent(nn, tcl) * nn + ent(on, ocl) * on) / (log(2) * (nn + on))
 end
 
+-- Bin every x value of `tbl` once and keep the id past the end of the
+-- row.  A bin id is a function of (row, column) alone -- it does not
+-- depend on which rows a node happens to hold -- and `Forest` hands
+-- all its trees the same tbl and the same row tables.  Without this,
+-- one id is recomputed 34 to 71 times a build (measured, four sets).
+-- With it, `tally`'s inner loop is an add and a read: no method
+-- dispatch, no arithmetic, and no NUM/SYM branch.
+--
+-- Two things make writing into the row safe.  Nothing anywhere reads
+-- `#row`, so the extra cells are invisible to the rest of the code;
+-- and `clone` builds a fresh TAB, so `binAt` belongs to this table.
+-- The ROWS, though, are shared with whatever table they came from:
+-- two tables binning the same rows would write the same slots and the
+-- last would win.  Hence one entry point, `TAB.cut`, and a guard --
+-- and hence `tbl.rows`, not a node's subset, which is also what makes
+-- it once a run rather than once a node.
+-- The klass rides along, for the same reason and in the same place:
+-- the search wants it as a small int, and a node that read the string
+-- would hash it once per row per column.  Its slot is free -- the
+-- klass is a y column, so no x column claims `off + klass.at`.
+-- `kodes` is the way back, which `mid` and `posts` still need.
+binRows = function(tbl)
+  if tbl.binned then
+    return
+  end
+  tbl.binned = true
+  local off = #tbl.cols
+  local _list_0 = tbl.x
+  for _index_0 = 1, #_list_0 do
+    local col = _list_0[_index_0]
+    col.binAt = off + col.at
+    local _list_1 = tbl.rows
+    for _index_1 = 1, #_list_1 do
+      local row = _list_1[_index_1]
+      row[col.binAt] = col:slot(row[col.at])
+    end
+  end
+  tbl.kodeAt, tbl.kodes, tbl.nk = off + tbl.klass.at, { }, 0
+  local seen = { }
+  local _list_1 = tbl.rows
+  for _index_0 = 1, #_list_1 do
+    local row = _list_1[_index_0]
+    local v = row[tbl.klass.at]
+    if not seen[v] then
+      tbl.nk = tbl.nk + 1
+      seen[v] = tbl.nk
+      tbl.kodes[tbl.nk] = v
+    end
+    row[tbl.kodeAt] = seen[v]
+  end
+  return nil
+end
+
 -- Count `rows` into (bin x klass); report the occupied span and how
 -- many rows landed.  The span keeps a four-row leaf from sweeping
 -- fifty-one bins.
-tally = function(col, rows, nk, nb, lo, up, nn, k, b)
+tally = function(col, rows, kat, nk, nb, lo, up, nn, k, b, at)
   for k = 1, nb * nk do
     Hist[k] = 0
   end
   lo, up, nn = nb + 1, 0, 0
-  for k, row in order(rows) do
-    b = col:slot(row[col.at])
+  at = col.binAt
+  for _, row in order(rows) do
+    b = row[at]
     if b then
-      local _update_0 = (b - 1) * nk + Krow[k]
+      local _update_0 = (b - 1) * nk + row[kat]
       Hist[_update_0] = Hist[_update_0] + 1
       lo, up, nn = min(lo, b), max(up, b), nn + 1
     end
@@ -459,7 +495,7 @@ end
 -- rather than rebuilt; old term off then new term on, in that order,
 -- because float addition is not associative and `(cl-a)+z` differs
 -- from `cl+(z-a)` by enough to flip a near-tie.
-sweepNum = function(col, nk, lo, up, nn, out, on, tcl, ocl, b, i, c, a, z)
+NUM.sweep = function(self, nk, lo, up, nn, out, on, tcl, ocl, b, i, c, a, z)
   on, nn, tcl, ocl = nn, 0, 0, 0
   for i = 1, nk do
     ThisC[i], ThatC[i] = 0, 0
@@ -484,15 +520,16 @@ sweepNum = function(col, nk, lo, up, nn, out, on, tcl, ocl, b, i, c, a, z)
     if nn < the.leaf or on < the.leaf then
       goto _continue_0
     end
-    out(sc(nn, tcl, on, ocl), col:edge(b))
+    out(sc(nn, tcl, on, ocl), self:edge(b))
     ::_continue_0::
   end
+  return nil
 end
 
 -- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `this` is one bin on
 -- its own and `that` is everything else -- no carrying, and the bins
 -- need no order between them.
-sweepSym = function(col, nk, lo, up, nn, out, b, i, c, d, tn, on, tcl, ocl)
+SYM.sweep = function(self, nk, lo, up, nn, out, b, i, c, d, tn, on, tcl, ocl)
   for i = 1, nk do
     ThatC[i] = 0
     for b = lo, up do
@@ -510,23 +547,31 @@ sweepSym = function(col, nk, lo, up, nn, out, b, i, c, d, tn, on, tcl, ocl)
     if tn < the.leaf or on < the.leaf then
       goto _continue_0
     end
-    out(sc(tn, tcl, on, ocl), col:edge(b))
+    out(sc(tn, tcl, on, ocl), self:edge(b))
     ::_continue_0::
   end
+  return nil
 end
 
 -- One column, counted and swept.  The only thing the two kinds still
--- disagree about is what a cut MEANS, which is the sweep.
-hist = function(col, rows, ks, nk, out, nb, lo, up, nn)
+-- disagree about is what a cut MEANS, so that is the one thing the
+-- column is asked: `slots`, `slot`, `edge` and `sweep` all dispatch on
+-- it, and nothing here tests which kind it is.
+--
+-- The counting stays a plain function.  `NUM` and `SYM` are two
+-- metatables with no parent -- `Col` picks between them, it is not a
+-- base class -- so a shared prologue has nowhere polymorphic to live,
+-- and giving it the name `hist` on both would mean copying it twice.
+hist = function(col, rows, kat, nk, out, nb, lo, up, nn)
   nb = col:slots()
   if not (nb and nb > 1) then
     return
   end
-  lo, up, nn = tally(col, rows, nk, nb)
+  lo, up, nn = tally(col, rows, kat, nk, nb)
   if nn < 2 * the.leaf or lo >= up then
     return
   end
-  return (col.it == NUM and sweepNum or sweepSym)(col, nk, lo, up, nn, out)
+  return col:sweep(nk, lo, up, nn, out)
 end
 
 -- The cut of `rows` that leaves the least klass entropy, found by
@@ -535,7 +580,7 @@ end
 -- reduce to the same histogram: bin the column, count (bin x klass),
 -- sweep the boundaries.  Nothing is sorted and nothing is
 -- accumulated into a `Sym`, which is where the time used to go.
-TAB.cut = function(self, rows, ks, cols)
+TAB.cut = function(self, rows, cols)
   local col1
   local bs, bc, bv
   local offer
@@ -544,10 +589,10 @@ TAB.cut = function(self, rows, ks, cols)
       bs, bc, bv = score, col1, v
     end
   end
-  local nk = codeKlass(ks)
+  binRows(self)
   for _, col in order(pick(self.x, cols)) do
     col1 = col
-    hist(col, rows, ks, nk, offer)
+    hist(col, rows, self.kodeAt, self.nk, offer)
   end
   return bs and {
     col = bc,
@@ -703,39 +748,26 @@ end
 -- tree so every node redraws its own few.
 -- `tab` grows trees over a KLASS only; regression is `Rmeans`' job,
 -- and a tree whose target is a distance has no entropy to count.
-Tree = function(tbl, rows, y, Y, lvl, cols)
+Tree = function(tbl, rows, lvl, cols)
   rows = rows or tbl.rows
-  y = y or function(row)
-    return row[tbl.klass.at]
-  end
-  Y = Y or Sym
   local node = new(TREE, {
     tbl = tbl,
     rows = rows,
-    y = y,
-    Y = Y,
     lvl = lvl or 1,
     cols = cols or 0,
     n = #rows,
-    ks = { },
     txt = ""
   })
   return node:sum():grow()
 end
 
--- What this node answers with: `@ks` (one klass per row), `@all`
--- (those klasses, summarized) and `@mid` (their majority).
--- `mk` and `fy` are not decoration.  `@Y` and `@y` hold plain
--- functions, not methods, and yue compiles `@Y!` to `self:Y()` and
--- `@y row` to `self:y(row)` -- it passes the node in as the first
--- argument.  `Num` would read it as `txt` and call `txt:find`.  Bind
--- the field to a local first and the call stays a plain call.
-TREE.sum = function(self, fy, v)
-  self.all, fy = self:Y(), self.y
+-- What this node answers with: `@all` (its rows' klasses, summarized)
+-- and `@mid` (their majority).  Both are wanted by a leaf that has to
+-- vote, so both survive the search caching klass codes on the rows.
+TREE.sum = function(self, at)
+  self.all, at = Sym(), self.tbl.klass.at
   for _, row in order(self.rows) do
-    v = fy(row)
-    self.ks[row] = v
-    self.all:add(v)
+    self.all:add(row[at])
   end
   self.mid = self.all:mid()
   return self
@@ -754,8 +786,8 @@ TREE.grow = function(self)
     end
     if #a >= the.leaf and #b >= the.leaf then
       self.at = cut
-      self.left = Tree(self.tbl, a, self.y, self.Y, self.lvl + 1, self.cols)
-      self.right = Tree(self.tbl, b, self.y, self.Y, self.lvl + 1, self.cols)
+      self.left = Tree(self.tbl, a, self.lvl + 1, self.cols)
+      self.right = Tree(self.tbl, b, self.lvl + 1, self.cols)
       local op = cut.col.it == SYM and {
         "==",
         "~="
@@ -771,11 +803,7 @@ TREE.grow = function(self)
 end
 
 TREE.cut = function(self)
-  local ks = map(self.rows, function(row)
-    return self.ks[row]
-  end)
-  local won = self.tbl:cut(self.rows, ks, self.cols)
-  return won
+  return self.tbl:cut(self.rows, self.cols)
 end
 
 -- A TAB of just `@rows`, so `ycols` and `dict` can report what this
@@ -893,9 +921,7 @@ Forest = function(tbl, rows, rounds)
     tbl = tbl
   })
   for k = 1, rounds or the.rounds do
-    i.all[k] = Tree(tbl, some(rows, #rows), (function(row)
-      return row[tbl.klass.at]
-    end), Sym, 1, c)
+    i.all[k] = Tree(tbl, some(rows, #rows), 1, c)
   end
   return i
 end
