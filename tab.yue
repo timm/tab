@@ -1,0 +1,967 @@
+-- <!--- vim: set ts=2 sw=2 sts=2 et cc=75 : -->
+-- tab.yue: tab.lua, ported to yuescript.  Same algorithm, same
+-- golden values.  Three lua idioms go away: the `_ENV` trick (yue
+-- builds the export table at the foot), the scratch-parameter locals
+-- (yue scopes a local at its first assignment), and the explicit
+-- `self` (yue's `=>` and `@`).  What replaces them is listed in the
+-- notes at the foot of this file.
+--
+-- One yue hazard, for whoever edits this next: an assignment to a
+-- name already local in an enclosing scope writes THAT name.  So a
+-- function that wants its own `near` must say `local near` first, or
+-- it will overwrite the module's `near` test helper.  Marked below.
+
+local rng          -- the generator's state; private, unlike lua's _ENV
+local *            -- forward declare the rest, so order stops mattering
+
+the = {}
+help = [[
+tab: a good guess from a few dozen labels.
+Range means, shrunk to the grand mean, weighed by variance.
+(c) 2026 Tim Menzies <timm@ieee.org> MIT license.
+
+usage: luajit tab.lua [name=value | action | file.csv ...]
+
+flags:
+  version=0.6.0    version number
+  bins=7           numeric columns get this many bins
+  budget=50        labels, all in
+  check=5          of those, saved for the test rows
+  fmt=%.2f         how a fraction is printed
+  cuts=51          candidate cuts per numeric column
+  depth=12         how deep a tree may grow
+  leaf=2           rows each side of a cut needs
+  m=2              m-estimate: prior weight for a thin bin
+  p=2              minkowski coefficient
+  reps=3           repeats, when something is timed
+  rounds=30        trees in a forest
+  seed=1234567891  random number seed
+  test=None        held-out csv (None: demos test on train)
+  train=~/gits/moot/optimize/misc/auto93.csv
+
+actions:
+   -h              print help
+   --all           every fast action (--num, --split ... run one)
+
+Any flag above can lead an action, so `seed=1 --split` is a thing.]]
+
+floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
+abs, min, max = math.abs, math.min, math.max
+
+TAB, NUM, SYM, RMEANS, NB, TREE, FOREST = {}, {}, {}, {}, {}, {}, {}
+
+-- ---- values ---------------------------------------------------------
+values = (s) ->                   -- row; values from comma-separated `s`
+  u = {}
+  for s1 in (s .. ",")\gmatch("(.-),")
+    v = s1\match("^%s*(.-)%s*$")
+    u[#u + 1] = tonumber(v) or v
+  u
+
+csv = (file) ->                   -- rows; `rows` in a `file:str`
+  rows = {}
+  path = file\gsub("^~", os.getenv("HOME") or "~")
+  for line in io.lines(path)
+    s = line\match("^%s*(.-)%s*$")
+    if s != "" and s\sub(1, 1) != "#"
+      rows[#rows + 1] = values(s)
+  rows
+
+-- ---- columns --------------------------------------------------------
+Col = (txt, at) ->                -- SYM | NUM; a-z Sym; A-Z Num
+  (txt\find("^%u") and Num or Sym)(txt, at)
+
+Sym = (txt, at) ->                -- SYM; counts of symbols in column `at`
+  new SYM, {txt: txt or "S", at: at or 0, n: 0, has: {}, cl: 0}
+
+-- `@cl` is sum(c*log c) over the counts, kept up to date here so
+-- `div` need not walk `@has` at all.  Two reasons.  Order: `pairs`
+-- has none and floating point addition is not associative, so a sum
+-- taken in hash order makes an entropy's last bits -- and so a tie
+-- between two cuts -- turn on how the table laid itself out, and
+-- (measured) the same seed then grew a different forest run to run.
+-- Cost: a cut sweep calls `add` twice and `div` twice per candidate,
+-- so paying two logs here beats paying one per klass there.
+SYM.add = (v, inc): v =>          -- value; `inc` more of `v` (-1 = less)
+  unless v == "?"
+    inc or= 1
+    @n += inc
+    c = @has[v] or 0
+    @cl -= c * log(c) if c > 0
+    c += inc
+    if c <= 0
+      @has[v] = nil
+    else
+      @has[v] = c
+      @cl += c * log(c)
+
+-- H = -sum (c/n) log(c/n) = log n - (1/n) sum c log c, and `add`
+-- already holds that inner sum, so this is arithmetic, not a walk.
+SYM.div = =>                      -- num; entropy, in bits
+  @n < 1 and 0 or max(0, log(@n) - @cl / @n) / log(2)
+
+-- The mode, with a tie broken on `tostring` -- once per node, not
+-- once per candidate cut, so the sort is affordable and `pairs`
+-- order (which differs between ports) never decides a leaf's label.
+SYM.mid = =>                      -- value; the mode
+  ks = {}
+  for v in pairs @has
+    ks[#ks + 1] = v
+  sort ks, (x, y) -> tostring(x) < tostring(y)
+  local bk                        -- `local`: assigned inside the loop
+  b = -1
+  for _, v in order ks
+    b, bk = @has[v], v if @has[v] > b
+  bk
+
+SYM.norm = (v) => v               -- value; a sym is its own norm
+SYM.holds = (x, v) => x == "?" or x == v
+SYM.bin = (v) => v                -- value; and its own bin
+
+SYM.nVals = =>                    -- int; values `@` has seen, at least 2
+  @kinds = @kinds or max(2, sum(@has, -> 1))
+  @kinds
+
+Num = (txt, at) ->                -- NUM; Welford summary of column `at`
+  new NUM, {txt: txt or "N", at: at or 0, n: 0, mu: 0, m2: 0,
+            w: ((txt or "")\find("%-$") and 0 or 1)}
+
+NUM.add = (v, inc): v =>          -- value; `inc` more of `v` (-1 takes it
+  unless v == "?"                 -- back out, so one scan can shift rows
+    inc or= 1                     -- across a cut)
+    @n += inc
+    if @n <= 0
+      @n, @mu, @m2 = 0, 0, 0
+    else
+      d = v - @mu
+      @mu += inc * d / @n
+      @m2 += inc * d * (v - @mu)
+
+NUM.div = => @n < 2 and 0 or sqrt(max(@m2, 0) / (@n - 1))
+NUM.mid = => @mu                  -- num; the mean
+NUM.holds = (x, v) => x == "?" or x <= v  -- bool; "?" says yes, so a
+                                          -- cut never loses a row
+NUM.bin = (v) =>                  -- value; `v`'s bin, 1..`the.bins`
+  return v if v == "?"
+  b = 1 + floor(the.bins * @norm(v))
+  b > the.bins and the.bins or b
+
+NUM.norm = (v) =>                 -- value; `v` on a logistic cdf,
+  return v if v == "?"            -- clipped at three standard deviations
+  z = (v - @mu) / (@div! + 1e-32)
+  z = z > 3 and 3 or (z < -3 and -3 or z)
+  1 / (1 + exp(-1.7 * z))
+
+-- Offer `out` one cut between each pair of distinct sorted neighbours:
+-- sort once, grow `near` left to right while `far` sheds the same.
+-- ---- tables ---------------------------------------------------------
+Tab = (src) ->                    -- TAB from `src`: a file name, or rows
+  adds src, new(TAB, {rows: {}, names: {}, cols: {}, x: {}, y: {}})
+
+TAB.add = (row): row =>           -- row; the first `row` is the names
+  return @head(row) if #@cols == 0
+  @rows[#@rows + 1] = row
+  for _, col in order @cols
+    col\add row[col.at]
+
+TAB.head = (names): nil =>        -- read `names:row` as `@`'s columns:
+  @names = names                  -- X skip, -+! goals, ! the klass,
+  for at, txt in order names      -- - minimize
+    col = Col(txt, at)
+    @cols[#@cols + 1] = col
+    unless txt\find("X$")
+      if txt\find("[-+!]$")
+        @y[#@y + 1] = col
+        @klass = col if txt\find("!$")
+      else
+        @x[#@x + 1] = col
+
+TAB.clone = (rows, how) =>        -- TAB; `rows` in a fresh TAB
+  head = how and map(@cols, (col) -> col.txt\lower!) or @names
+  out = {head}                    -- `how`="bin" discretizes, so sym
+  for _, row in order (rows or {})
+    out[#out + 1] = if how
+      map @cols, (col) -> col[how](col, row[col.at])
+    else
+      row
+  Tab out
+
+TAB.mid = (cols) =>               -- dict; {name: middle}, for logfmt
+  u = {}
+  for _, col in order (cols or @cols)
+    u[col.txt] = col\mid!
+  u
+
+TAB.ydist = (row) =>              -- num; `row`'s distance to heaven
+  fn = (col) -> abs(col\norm(row[col.at]) - col.w) ^ the.p
+  (sum(@y, fn) / #@y) ^ (1 / the.p)
+
+TAB.split = =>                    -- rows,rows; 80:20, off a copy:
+  rows = shuffle map(@rows, same) -- never @rows itself
+  n = floor(.8 * #rows)
+  u1, u2 = {}, {}
+  t = u1
+  for j, row in order rows
+    t = u2 if j > n
+    t[#t + 1] = row
+  u1, u2
+
+-- Offer `out` every cut of every x column over `rows`: `ks` is one
+-- y per row; `Y` collects them, so what "least diversity" means --
+-- Num and sd, or Sym and entropy -- is the caller's choice.
+-- ---- histogram cut ---------------------------------------------
+-- The same binned search, counted instead of accumulated.
+--
+-- The search this replaced built a `Sym` for `near` and another for
+-- `far` and walked every row through both; each `Sym.add` hashes a
+-- klass string and keeps an entropy cache -- `cl + c*log c` --
+-- current, so it spent a `log` per row per column per node.  The
+-- profile put 53% of a run in there, and the sort before it 55% of
+-- the run before THAT.
+--
+-- Counting instead: one integer per (bin, klass).  The klass strings
+-- are coded to integers ONCE per node, so the inner loop never
+-- hashes a string; entropy is computed from the counts at the bin
+-- boundaries only, and updated for just the klasses a bin actually
+-- holds.  For 1000 rows and 2 klasses that is ~3000 `log` calls
+-- replaced by a few hundred.
+--
+-- Scratch shared by every column of a node: the klass codes, the
+-- (bin x klass) counts, and the two running klass tallies.
+Code, Krow, NearC, FarC = {}, {}, {}, {}
+
+-- The klasses as small integers, and how many distinct.  Done once a node
+-- and reused by every column it looks at, so no inner loop ever
+-- hashes a klass string.
+codeKlass = (ks,    k,n,v,c) -> --> int
+  for v in pairs Code
+    Code[v] = nil
+  n = 0
+  for k = 1, #ks
+    v = ks[k]
+    c = Code[v]
+    unless c
+      n += 1
+      Code[v] = n
+      c = n
+    Krow[k] = c
+  n
+
+-- ---- binning, on the column itself --------------------------------
+-- A column knows its own bins.  `slot` puts a value in one, `edge`
+-- turns a bin back into the threshold to report, `slots` says how
+-- many there are.  Numeric edges come off the summary the column
+-- already keeps, so they are computed once and then shared by every
+-- tree and every node of the ensemble -- which is the whole trick:
+-- nothing is sorted, and nothing is re-derived per node.
+NUM.slots = => the.cuts
+NUM.edge  = (b) => @mu + (b - @hi - 0.5) * @r
+NUM.slot  = (x) =>                 -- nil when there is nothing to cut
+  unless @r
+    @hi = floor the.cuts / 2
+    @r  = 3 * @div! / @hi          -- so `hi` bins reach exactly 3sd
+  return nil if x == "?" or @r <= 0
+  b = floor((x - @mu) / @r + 0.5)  -- outliers pin to the end bins
+  (b < -@hi and -@hi or (b > @hi and @hi or b)) + @hi + 1
+
+-- A symbolic column's bins are its own values, indexed once, sorted
+-- so a tie falls where it always did.
+SYM.index = (    vs,v,n) =>
+  unless @vi
+    vs = {}
+    for v in pairs @has
+      vs[#vs + 1] = v
+    sort vs, (a, b) -> tostring(a) < tostring(b)
+    @vi, @vs = {}, vs
+    for n = 1, #vs
+      @vi[vs[n]] = n
+  @vi
+SYM.slots = => @index! and #@vs
+SYM.edge  = (b) => @vs[b]
+SYM.slot  = (x) => x != "?" and @index![x] or nil
+
+-- ---- the histogram ------------------------------------------------
+-- `SYM.div` is `(log n - cl/n)/log 2` with `cl = sum c*log c`, so a
+-- count that moves changes exactly one term of cl.  Keeping cl
+-- current costs two `log`s per changed klass per bin, where walking
+-- the rows cost one per row.
+clog = (c) -> c > 0 and c * log(c) or 0
+
+-- Entropy of `n` rows whose `sum c*log c` is `cl`, in nats: the
+-- `/log 2` comes out once, in the score.
+ent = (n, cl) -> max 0, log(n) - cl / n
+
+-- `n` rows split `near`/`far` score as their sizes weigh their
+-- entropies -- the same quantity `TAB.cut` used to get from two
+-- `Sym`s, verified equal to `Sym.div` to 2.7e-15.
+sc = (nn, ncl, fn, fcl) ->
+  (ent(nn, ncl) * nn + ent(fn, fcl) * fn) / (log(2) * (nn + fn))
+
+-- Count `rows` into (bin x klass); report the occupied span and how
+-- many rows landed.  The span keeps a four-row leaf from sweeping
+-- fifty-one bins.
+tally = (col, rows, nk, nb,    lo,up,nn,k,b) -> --> int,int,int
+  for k = 1, nb * nk
+    Hist[k] = 0
+  lo, up, nn = nb + 1, 0, 0
+  for k, row in order rows
+    b = col\slot row[col.at]
+    if b
+      Hist[(b - 1) * nk + Krow[k]] += 1
+      lo, up, nn = min(lo, b), max(up, b), nn + 1
+  lo, up, nn
+
+-- NUMERIC: walk left to right, moving each bin's counts from `far`
+-- to `near`, offering the cut that leaves behind.  `cl` is carried
+-- rather than rebuilt; old term off then new term on, in that order,
+-- because float addition is not associative and `(cl-a)+z` differs
+-- from `cl+(z-a)` by enough to flip a near-tie.
+sweepNum = (col, nk, lo, up, nn, out,    fn,ncl,fcl,b,i,c,a,z) -> --> nil
+  fn, nn, ncl, fcl = nn, 0, 0, 0
+  for i = 1, nk                    -- `far` starts holding every row
+    NearC[i], FarC[i] = 0, 0
+    for b = lo, up
+      FarC[i] += Hist[(b - 1) * nk + i]
+    fcl += clog FarC[i]
+  for b = lo, up - 1               -- a cut after the last bin would
+    for i = 1, nk                  -- leave `far` empty
+      c = Hist[(b - 1) * nk + i]
+      continue if c == 0
+      a, z = clog(NearC[i]), clog(NearC[i] + c)
+      NearC[i], ncl = NearC[i] + c, ncl - a + z
+      a, z = clog(FarC[i]), clog(FarC[i] - c)
+      FarC[i], fcl = FarC[i] - c, fcl - a + z
+      nn, fn = nn + c, fn - c
+    continue if nn < the.leaf or fn < the.leaf
+    out sc(nn, ncl, fn, fcl), col\edge b
+
+-- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `near` is one bin on
+-- its own and `far` is everything else -- no carrying, and the bins
+-- need no order between them.
+sweepSym = (col, nk, lo, up, nn, out,    b,i,c,d,nnn,fnn,ncl,fcl) -> --> nil
+  for i = 1, nk
+    FarC[i] = 0
+    for b = lo, up
+      FarC[i] += Hist[(b - 1) * nk + i]
+  for b = lo, up
+    nnn, fnn, ncl, fcl = 0, 0, 0, 0
+    for i = 1, nk
+      c = Hist[(b - 1) * nk + i]
+      d = FarC[i] - c
+      nnn, ncl = nnn + c, ncl + clog c
+      fnn, fcl = fnn + d, fcl + clog d
+    continue if nnn < the.leaf or fnn < the.leaf
+    out sc(nnn, ncl, fnn, fcl), col\edge b
+
+-- One column, counted and swept.  The only thing the two kinds still
+-- disagree about is what a cut MEANS, which is the sweep.
+hist = (col, rows, ks, nk, out,    nb,lo,up,nn) -> --> nil
+  nb = col\slots!
+  return unless nb and nb > 1
+  lo, up, nn = tally col, rows, nk, nb
+  return if nn < 2 * the.leaf or lo >= up
+  (col.it == NUM and sweepNum or sweepSym) col, nk, lo, up, nn, out
+
+
+Hist = {}
+-- The cut of `rows` that leaves the least klass entropy, found by
+-- counting.  `tab` grows trees over klasses only -- regression is
+-- `Rmeans`' job -- so every target is a `Sym` and both column kinds
+-- reduce to the same histogram: bin the column, count (bin x klass),
+-- sweep the boundaries.  Nothing is sorted and nothing is
+-- accumulated into a `Sym`, which is where the time used to go.
+TAB.cut = (rows, ks, cols) =>
+  local col1                      -- `local`: `offer` closes over it
+  local bs, bc, bv                -- and each column rebinds it
+  offer = (score, v) ->
+    if bs == nil or score < bs    -- strict `<` keeps the FIRST of a
+      bs, bc, bv = score, col1, v -- tie
+  nk = codeKlass ks                  -- klass strings -> ints, once a node
+  for _, col in order pick(@x, cols)   -- `cols`=0: all of them
+    col1 = col
+    hist col, rows, ks, nk, offer
+  bs and {col: bc, v: bv}
+
+-- ---- rmeans ---------------------------------------------------------
+Rmeans = (tbl, rows, y) ->        -- RMEANS; per x column, its bins' y
+  i = new RMEANS, {all: Num!, has: {}}   -- means and the variance cut
+  sub = tbl\clone rows
+  i.cols = sub.x
+  adds sub.rows, i.all, y
+  for _, col in order sub.x
+    bins = {}
+    for _, row in order sub.rows
+      b = col\bin row[col.at]
+      bins[b] = bins[b] or Num!
+      bins[b]\add y(row)
+    fn = (v) -> v.n / i.all.n * (v\div! ^ 2)
+    w = (i.all\div! ^ 2) - sum(bins, fn)
+    i.has[col.at] = {bins: bins, w: max(0, w)}
+  i
+
+RMEANS.like = (col, row): nil =>  -- num,num; `col`'s m-estimated guess
+  it = @has[col.at]               -- for `row`, and its worth
+  v = it and it.bins[col\bin(row[col.at])]
+  if v and it.w > 0
+    return (v.n * v.mu + the.m * @all.mu) / (v.n + the.m), it.w
+
+RMEANS.guess = (row) =>           -- num; `row`'s guess: the worth-
+  s, w = 0, 0                     -- weighted mean of every column's like
+  for _, col in order @cols
+    g, wt = @like(col, row)
+    s, w = s + wt * g, w + wt if g
+  w > 0 and s / w or @all.mu
+
+-- ---- bayes ----------------------------------------------------------
+Nb = (tbl, rows) ->               -- NB; one sub-TAB per klass in `rows`
+  i = new NB, {tbl: tbl, subs: {}, n: #rows, nKlass: 0}
+  for _, row in order rows
+    v = row[tbl.klass.at]
+    unless i.subs[v]
+      i.subs[v], i.nKlass = tbl\clone!, i.nKlass + 1
+    i.subs[v]\add row
+  i
+
+-- `cols` is what the likelihood runs over, so a caller holding a
+-- column subset -- an ensemble member drawn on its own subspace --
+-- can ask this NB about just those, with no second NB built for it.
+-- Default `sub.x` is every x column, which is what every existing
+-- caller meant.  The global column is reached by `@tbl.cols[col1.at]`
+-- rather than by position in `x`, so a subset LIST works and keeps
+-- one iteration order; indexing `@tbl.x[at]` would have needed the
+-- subset to stay sparse and be walked by `pairs`.
+NB.like = (sub, row, cols = sub.x) =>   -- num; log P(`row` | `sub:TAB`)
+  fn = (col1, at) ->
+    col, v = @tbl.cols[col1.at], row[col1.at]  -- col knows every value;
+    return 0 if v == "?"                -- col1 knows this klass's
+    seen = (col1.has[v] or 0) + the.m   -- and m per value
+    all = col1.n + the.m * col\nVals!
+    log(seen / all)
+  prior = log((#sub.rows + the.m) / (@n + the.m * @nKlass))  -- m/klass
+  prior + sum(cols, fn)
+
+-- `pairs` has no order, so a klass tie used to fall whichever way
+-- the hash happened to lie.  Sort the keys once and every tie after
+-- goes to the same klass in lua, yue and python alike.
+NB.klasses = =>                   -- list; `@subs`'s keys, sorted
+  ks = {}
+  for k in pairs @subs
+    ks[#ks + 1] = k
+  sort ks, (a, b) -> tostring(a) < tostring(b)
+
+NB.guess = (row) =>               -- value; `row`'s likeliest klass
+  local b, bk, v
+  b = -math.huge
+  for _, k in order @klasses!
+    v = @like(@subs[k], row)
+    b, bk = v, k if v > b         -- strict `>`: the first one wins
+  bk
+
+-- p(klass | `row`), so an ensemble can average how sure it is -- and
+-- so an auc has a score to rank by.  `like` returns a LOG likelihood,
+-- so the top one comes off before `exp`, which would otherwise
+-- underflow to zero for every klass at once.
+NB.posts = (row) =>               -- dict; p(klass | `row`)
+  local hi, z
+  ks, t = @klasses!, {}
+  hi = -math.huge
+  for _, k in order ks
+    t[k] = @like(@subs[k], row)
+    hi = max hi, t[k]
+  z = 0
+  for _, k in order ks
+    t[k] = exp(t[k] - hi)
+    z += t[k]
+  u = {}
+  for _, k in order ks
+    u[k] = t[k] / z
+  u
+
+-- ---- tree -----------------------------------------------------------
+-- One node over `rows`, summarized, then grown.  `cols` is how many
+-- x columns a split may look at (0 = all of them); it rides down the
+-- tree so every node redraws its own few.
+-- `tab` grows trees over a KLASS only; regression is `Rmeans`' job,
+-- and a tree whose target is a distance has no entropy to count.
+Tree = (tbl, rows, y, Y, lvl, cols) ->
+  rows or= tbl.rows
+  y or= (row) -> row[tbl.klass.at]
+  Y or= Sym
+  node = new TREE, {tbl: tbl, rows: rows, y: y, Y: Y, lvl: lvl or 1,
+                    cols: cols or 0, n: #rows, ks: {}, txt: ""}
+  node\sum!\grow!
+
+-- What this node answers with: `@ks` (one klass per row), `@all`
+-- (those klasses, summarized) and `@mid` (their majority).
+-- `mk` and `fy` are not decoration.  `@Y` and `@y` hold plain
+-- functions, not methods, and yue compiles `@Y!` to `self:Y()` and
+-- `@y row` to `self:y(row)` -- it passes the node in as the first
+-- argument.  `Num` would read it as `txt` and call `txt:find`.  Bind
+-- the field to a local first and the call stays a plain call.
+TREE.sum = (    fy,v) =>
+  @all, fy = @Y!, @y
+  for _, row in order @rows
+    v = fy row
+    @ks[row] = v
+    @all\add v
+  @mid = @all\mid!                -- the majority klass
+  @
+
+-- `@`, with two kids under it when a cut pays: deep enough to bother,
+-- big enough to split, and both sides big enough to keep.  Each kid
+-- is a `Tree`, which grows in turn -- so the pair recurse together.
+TREE.grow = =>
+  cut = @n >= 2 * the.leaf and @lvl < the.depth and @cut!
+  if cut
+    a, b = {}, {}
+    for _, row in order @rows
+      t = cut.col\holds(row[cut.col.at], cut.v) and a or b
+      t[#t + 1] = row
+    if #a >= the.leaf and #b >= the.leaf     -- else, a bad cut
+      @at = cut
+      @left = Tree(@tbl, a, @y, @Y, @lvl + 1, @cols)
+      @right = Tree(@tbl, b, @y, @Y, @lvl + 1, @cols)
+      op = cut.col.it == SYM and {"==", "~="} or {"<=", ">"}
+      @left.txt = cut.col.txt .. " " .. op[1] .. " " .. o(cut.v)
+      @right.txt = cut.col.txt .. " " .. op[2] .. " " .. o(cut.v)
+  @
+
+TREE.cut = =>                     -- dict; the cut of `@rows` leaving
+  ks = map @rows, (row) -> @ks[row]        -- least klass entropy
+  won = @tbl\cut(@rows, ks, @cols)
+  won
+
+-- A TAB of just `@rows`, so `ycols` and `dict` can report what this
+-- node's y columns look like.  Cloning is the costliest thing a node
+-- can do and only reporting needs it -- `cut` reads `col.at` and the
+-- rows it is handed, never a column's running stats -- so this waits
+-- until something asks.  A 30-tree forest never asks.
+TREE.sub = =>                     -- TAB; `@rows`, summarized, made once
+  @subbed = @subbed or @tbl\clone(@rows)
+  @subbed
+
+-- ---- asking ---------------------------------------------------------
+TREE.pick = (row) =>              -- TREE; leaf `row` falls into
+  return @ unless @at
+  c = @at
+  (c.col\holds(row[c.col.at], c.v) and @left or @right)\pick row
+
+TREE.ycols = (f) =>               -- str; one cell per y column
+  t, node = {}, @sub!
+  for k, col in order node.y
+    t[k] = ("%" .. max(10, #col.txt + 2) .. "s")\format(f(col))
+  table.concat t
+
+TREE.walk = =>                    -- fun; iterator over `@` and all below
+  todo = {@}
+  ->
+    n = table.remove todo
+    return unless n
+    if n.at
+      todo[#todo + 1] = n.right
+      todo[#todo + 1] = n.left
+    n
+
+TREE.show = (): nil =>            -- print `@`, one line per node
+  cell = (col) -> col.it == NUM and o(col.mu) or best(col.has, same)
+  t, ends = {}, {}
+  for n in @walk!
+    t[#t + 1] = n unless n.at
+  sort t, "mid"
+  ends[t[#t]] = " \226\156\151 "  -- cross the worst leaf,
+  ends[t[1]] = " \226\156\147 "   -- tick the best one
+  print(("%-26s %5s %6s   %s")\format("", "n", "mid",
+        @ycols((col) -> col.txt)))
+  for n in @walk!
+    print(("%-26s %5d %6s%s%s")\format(
+          ("|  ")\rep(max(0, n.lvl - 2)) .. n.txt,   -- root gets no bar
+          n.n, o(n.mid), ends[n] or "   ", n\ycols(cell)))
+  print ""
+
+-- Return `@` as nested tables: this node's n, mid, split and y-column
+-- centers, then its two kids under `left` and `right`.  So `logfmt`
+-- prints the whole tree as a record a later run can be diffed against.
+TREE.dict = =>                    -- dict
+  t, node = {n: @n, mid: @mid}, @sub!
+  t.txt = @txt if @txt != ""
+  for _, col in order node.y
+    t[col.txt] = col.it == NUM and col.mu or best(col.has, same)
+  if @at
+    t.left, t.right = @left\dict!, @right\dict!
+  t
+
+-- ---- predicting -----------------------------------------------------
+TREE.nb = =>                      -- NB; leaf's own naive Bayes, fitted
+  @model = @model or Nb(@sub!, @rows)   -- the first time asked for
+  @model
+
+TREE.posts = (row) =>             -- dict; p(klass | `row`) off the leaf
+  n, t = @pick(row), {}
+  for k, m in pairs n.all.has
+    t[k] = m / n.all.n
+  t
+
+-- ---- forest ---------------------------------------------------------
+-- `rounds` deep trees, each on its own bootstrap of `rows`, each node
+-- splitting on sqrt(#x) columns it draws itself.  Breiman's random
+-- forest, so: rows sampled once per tree, attributes resampled at
+-- every split.
+Forest = (tbl, rows, rounds) ->
+  rows or= tbl.rows
+  c = max(1, floor(sqrt(#tbl.x)))
+  i = new FOREST, {all: {}, tbl: tbl}
+  for k = 1, rounds or the.rounds
+    i.all[k] = Tree(tbl, some(rows, #rows),
+                    ((row) -> row[tbl.klass.at]), Sym, 1, c)
+  i
+
+-- A HARD vote: each tree offers one label -- its leaf's majority --
+-- and `ks` is the order the labels first arrived in.  That order is
+-- the tie-break: two labels on 15 votes each are settled by which
+-- tree spoke first, which is the same in any port, where `pairs`
+-- order is not.
+FOREST.votes = (row) =>           -- dict,list; tally, in order
+  t, ks = {}, {}
+  for _, m in order @all
+    k = m\pick(row).mid
+    if k != nil
+      ks[#ks + 1] = k if t[k] == nil
+      t[k] = (t[k] or 0) + 1
+  t, ks
+
+-- The tally, normalized, so this still reads as p(klass | `row`) and
+-- anything wanting a score to rank by (an auc) still has one.
+FOREST.posts = (row) =>           -- dict
+  t, ks = @votes(row)
+  z = 0
+  z += t[k] for _, k in order ks
+  {k, t[k] / max(z, 1) for _, k in order ks}
+
+FOREST.guess = (row) =>           -- value; the most voted
+  t, ks = @votes(row)
+  local bk
+  b = -1
+  for _, k in order ks do
+    b, bk = t[k], k if t[k] > b   -- strict: first wins
+  bk
+
+-- ---- misc -----------------------------------------------------------
+new = (meta, i) ->                -- connect instance `i` to class `meta`
+  meta.__index, meta.it, meta.__tostring = meta, meta, o
+  setmetatable i, meta
+
+cli = ->                          -- dict; update `the` from the command
+  for _, s in order arg           -- line: a name=value, action, or file
+    k, v = s\match("^(%a%w*)=(.*)$")
+    if k
+      the[k] = values(v)[1]
+    elseif eg[s] or slow[s]
+      (eg[s] or slow[s])!
+    else
+      the.file = s
+  the
+
+-- Restart the generator at `n`, or back at `the.seed`.  The setting
+-- and the state are two things: `the.seed` says where a run began,
+-- `rng` is where it has got to, so a header can still name the seed.
+seed = (n): nil ->
+  rng = n or the.seed
+
+rint = (n) ->                     -- int in 1..`n`, repeatable from seed
+  rng = (16807 * (rng or the.seed)) % 2147483647
+  1 + floor(n * rng / 2147483647)
+
+shuffle = (t) ->                  -- `t`, Fisher-Yates shuffled in place
+  for k = #t, 2, -1
+    j = rint(k)
+    t[k], t[j] = t[j], t[k]
+  t
+
+-- `n` of `t`, drawn WITH replacement: one bootstrap sample.  At
+-- n=#t about 63% of `t` turns up at least once, so the rest is that
+-- member's out-of-bag rows -- free held-out data, no extra split.
+some = (t, n) ->
+  u = {}
+  for k = 1, n or #t
+    u[k] = t[rint(#t)]
+  u
+
+-- `n` of `t`, no replacement; all of `t` when `n` is 0 or too big.
+-- Shuffles a copy on tab's own `rint`, so a draw is a seed.
+-- A forest redraws its columns at EVERY node, so this used to build
+-- two arrays a node for a list it throws away.  Pooled: the draw
+-- order is untouched, so `rint` is called exactly as often and in
+-- the same sequence, and the trees come out the same.
+Drawn = {}
+pick = (t, n) ->
+  return t if not n or n == 0 or n >= #t
+  for k = 1, #t
+    Drawn[k] = t[k]
+  for k = #Drawn, #t + 1, -1      -- a shorter column list than last
+    Drawn[k] = nil                -- time must not leave a tail
+  shuffle Drawn
+  for k = #Drawn, n + 1, -1
+    Drawn[k] = nil
+  Drawn
+
+map = (t, fn) ->                  -- list; `fn(v,k)` over `t`, nils dropped
+  u = {}
+  for k, v in ipairs t
+    u[#u + 1] = fn(v, k)
+  u
+
+sum = (t, fn) ->                  -- num; `fn(v,k)` over every item, added
+  n = 0
+  for k, v in pairs t
+    n += fn(v, k)
+  n
+
+adds = (src, it, fn) ->           -- it; `fn(x)` for x in `src`, added to
+  it or= Num!                     -- `it` (a fresh Num, by default)
+  fn or= same
+  for _, x in order src
+    it\add fn(x)
+  it
+
+best = (t, fn) ->                 -- any,num; key of `t` with the biggest
+  local n, m, u                   -- `fn(v,k)`, and that score
+  for k, v in pairs t
+    m = fn(v, k)
+    n, u = m, k if not n or m > n
+  u, n
+
+same = (x) -> x
+lt = (a, b) -> a < b
+
+sort = (t, fn) ->                 -- list; `t` sorted in place, ascending
+  if fn and type(fn) != "function"      -- `fn`: comparator, or a key
+    k = fn
+    fn = (a, b) -> a[k] < b[k]
+  table.sort t, fn
+  t
+
+order = (t, fn) ->                -- fun; `ipairs(t)` (or of a sorted
+  t = csv(t) if type(t) == "string"   -- copy, given `fn`); a string `t`
+  return ipairs(t) unless fn          -- means rows of a csv
+  ipairs sort(map(t, same), fn)
+
+o = (x) ->                        -- str; `x` as text, fractions through
+  if type(x) != "table"           -- `the.fmt`
+    return tostring(x) if type(x) != "number"
+    return tostring(x == floor(x) and floor(x) or the.fmt\format(x))
+  u = {}
+  if #x > 0
+    for _, v in ipairs x
+      u[#u + 1] = o(v)
+  else
+    for k, v in pairs x
+      if k != "it" and type(v) != "function"
+        u[#u + 1] = o(k) .. "=" .. o(v)
+  "{" .. table.concat((#x > 0 and u or sort(u, lt)), " ") .. "}"
+
+print = (...): nil ->             -- print the lot, tab separated, via `o`
+  out = {}
+  for j = 1, select("#", ...)
+    out[j] = o((select(j, ...)))
+  io.write table.concat(out, "\t"), "\n"
+
+fmt = (s, ...) -> s\format ...
+
+-- Return `d:dict` as "k=v k=v" lines, keys sorted.  Atoms pack onto
+-- one line; a table value gets its key, then its own lines, indented
+-- one more stop.  So a nested dict prints as deep as it really is.
+logfmt = (d, indent) ->           -- str
+  pad = ("  ")\rep(indent or 0)
+  u, flat, out = {}, {}, {}
+  for k in pairs d
+    u[#u + 1] = k
+  sort u
+  for _, k in order u
+    flat[#flat + 1] = k .. "=" .. o(d[k]) if type(d[k]) != "table"
+  out[1] = pad .. table.concat(flat, " ") if #flat > 0
+  for _, k in order u
+    if type(d[k]) == "table"
+      out[#out + 1] = pad .. k
+      out[#out + 1] = logfmt(d[k], (indent or 0) + 1)
+  table.concat out, "\n"
+
+-- Say what this run was: when it ran, which version ran it, what it
+-- was asked, and every setting in play.  An eg prints this above its
+-- results, so a result read a year later knows where it came from.
+about = (): nil ->
+  print ":config"
+  cmd = (arg and arg[0] or "?") ..
+        (arg and #arg > 0 and " " .. table.concat(arg, " ") or "")
+  print logfmt({date: os.date("%Y-%m-%d %H:%M:%S"),
+                version: the.version, cmd: cmd})
+  print logfmt(the)
+
+-- ---- tests ----------------------------------------------------------
+-- Demos double as tests: each prints a little, asserts golden values.
+-- Port tab to another language, pass these, and the port agrees with
+-- tab.lua to 1e-6.  `eg` run under --all; `slow` only when named.
+eg, slow = {}, {}
+
+near = (a, b) -> abs(a - b) < 1e-6
+
+ok = (got, want): got ->          -- assert `got` is `want`, then give it
+  assert (got == want or (type(got) == "number" and
+          type(want) == "number" and near(got, want))),
+         o(got) .. " ~= " .. o(want)
+
+run = (k): nil ->                 -- a :name header, then the action
+  print ":" .. k\gsub("^%-+", "")
+  seed!
+  (eg[k] or slow[k])!
+
+eg["-h"] = (): nil -> print help
+
+eg["--all"] = (): nil ->
+  worst = 0
+  local who
+  keys = {}
+  for k in pairs eg
+    unless (" -h --all ")\find(" " .. k .. " ", 1, true)
+      keys[#keys + 1] = k
+  for _, k in order(keys, lt)
+    t0 = os.clock!
+    run k
+    ms = (os.clock! - t0) * 1000
+    worst, who = ms, k if ms > worst
+  print fmt("PASS %s tests, worst %s at %.1fms", #keys, who, worst)
+
+slow["--secs"] = (): nil ->       -- time rmeans: train, then guess
+  file = the.file or the.train
+  tbl, tot = Tab(file), 0
+  for r = 1, the.reps
+    seed(the.seed + r)
+    tr, te = tbl\split!
+    sub = tbl\clone(tr)
+    y = (row) -> sub\ydist row
+    lim = the.budget - the.check
+    t0 = os.clock!
+    few = {}
+    for j = 1, (#tr < lim and #tr or lim)
+      few[j] = tr[j]
+    model = Rmeans(tbl, few, y)
+    for _, row in order te
+      model\guess row
+    tot += (os.clock! - t0)
+  print fmt("%s rows=%6d secs=%.4f",
+            file\match("([^/]+)%.csv$"), #tbl.rows, tot / the.reps)
+
+eg["--values"] = (): nil ->
+  t = values " 4.2, x,3"
+  print logfmt({got: o(t)})
+  ok t[1], 4.2
+  ok t[2], "x"
+  ok t[3], 3
+
+eg["--csv"] = (): nil ->
+  t = csv the.train
+  print logfmt({rows: #t, cells: #t[1]})
+  ok #t, 399
+  ok #t[1], 8
+  ok t[1][1], "Clndrs"
+
+eg["--num"] = (): nil ->
+  n = adds {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+  print logfmt({mu: n\mid!, sd: n\div!})
+  ok n\div!, 3.0276503541
+
+eg["--sym"] = (): nil ->
+  s = adds {"a", "a", "b", "c", "c", "c"}, Sym!
+  print logfmt({mode: s\mid!, ent: s\div!})
+  ok s\div!, 1.4591479170
+
+eg["--tab"] = (): nil ->
+  t = Tab the.train
+  print logfmt({rows: #t.rows, x: #t.x, y: #t.y})
+  ok #t.rows, 398
+  ok #t.x, 4
+  ok #t.y, 3
+
+eg["--mid"] = (): nil ->
+  t = Tab the.train
+  print logfmt(t\mid(t.y))
+  ok t\mid(t.y)["Acc+"], 15.5680904523
+
+eg["--ydist"] = (): nil ->
+  t = Tab the.train
+  print logfmt({guzzler: t\ydist(t.rows[1]), honda: t\ydist(t.rows[398])})
+  ok t\ydist(t.rows[1]), 0.7863215821
+  ok t\ydist(t.rows[398]), 0.1410148526
+
+eg["--split"] = (): nil ->
+  t = Tab the.train
+  tr, te = t\split!
+  print logfmt({train: #tr, test: #te})
+  ok #tr, 318
+  ok #te, 80
+  ok table.concat(tr[1], ","), "6,145,76,81,2,3160,19.6,30"
+  ok t.rows[1][1], 8           -- t.rows itself was not disturbed
+
+eg["--rmeans"] = (): nil ->
+  t, few = Tab(the.train), {}
+  y = (row) -> t\ydist row
+  for k = 1, 45
+    few[k] = t.rows[k]
+  m = Rmeans(t, few, y)
+  print logfmt({mu: m.all.mu, guess: m\guess(t.rows[1])})
+  ok m.all.mu, 0.9009519530
+  ok m\guess(t.rows[1]), 0.8530303902
+
+eg["--nb"] = (): nil ->
+  t = Tab {
+    {"Age", "job", "klass!"}
+    {20, "low", "no"}, {22, "low", "no"}, {25, "low", "no"}
+    {30, "med", "no"}, {60, "hi", "yes"}, {62, "hi", "yes"}
+    {65, "med", "yes"}, {70, "hi", "yes"}
+  }
+  b = t\clone(t.rows, "bin")
+  i = Nb(b, b.rows)
+  print logfmt({young: i\guess(b.rows[1]), old: i\guess(b.rows[8])})
+  ok i\guess(b.rows[1]), "no"
+  ok i\guess(b.rows[8]), "yes"
+
+eg["--logfmt"] = (): nil ->
+  s = logfmt {seed: 1, go: "nb", sub: {b: 2, a: 1}}
+  print s
+  ok s, "go=nb seed=1\nsub\n  a=1 b=2"
+
+halves = ->                    -- TAB; `the.file` as train and test TABs
+  tbl = Tab the.file
+  tr, te = tbl\split!
+  tr, te = tbl\clone(tr), tbl\clone(te)
+  y = (row) -> tr\ydist row
+  tr, te, y
+
+
+-- ---- start ----------------------------------------------------------
+for k, v in help\gmatch("\n%s+(%a+)=(%S+)")
+  the[k] = values(v)[1]
+the.file = the.train             -- tab-eg names its data file=; same
+
+main = (arg and arg[0]) or ""
+if main\find("tab%.yue$") or main\find("tab%.lua$")
+  if #arg == 0
+    eg["-h"]!
+  else
+    cli!
+
+-- Lua's `_ENV` trick is gone.  This is what replaces it: one table,
+-- written out, so the module's surface is a list you can read rather
+-- than "whatever the chunk happened to assign".  `__index: _G` keeps
+-- tab-eg's `local _ENV = tab` working -- math, io and table still
+-- resolve through it.  `rng` is deliberately absent: it is state, not
+-- API.
+setmetatable {
+    :the, :help, :eg, :slow
+    :floor, :exp, :sqrt, :log, :abs, :min, :max
+    :TAB, :NUM, :SYM, :RMEANS, :NB, :TREE, :FOREST
+    :values, :csv, :Col, :Sym, :Num, :Tab, :Rmeans, :Nb, :Tree, :Forest
+    :new, :cli, :seed, :rint, :shuffle, :some, :pick
+    :map, :sum, :adds, :best, :same, :lt, :sort, :order
+    :o, :print, :fmt, :logfmt, :about
+    :near, :ok, :run, :halves
+  }, {__index: _G}

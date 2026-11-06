@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# build: tab.yue -> tab.lua.  usage: ,/build
+#
+# tab.lua is GENERATED.  It was hand-written until the yue port
+# caught up and the two were measured byte-identical over 40 score
+# files (8 sets x nb, hardeep, hardeepauc, treedeep, treedeepauc), at
+# which point keeping two copies of one learner in step was only a
+# way to let them drift.  Edit tab.yue; run this; commit both.
+#
+# -c keeps the comments, which carry the argument and are most of
+# what a reader comes here for.  -s writes spaces, to match the rest
+# of the tree.  The build is deliberately NOT run by ,/run or ,/sh:
+# a corpus that recompiles per data set is a corpus that can change
+# halfway through, so the build happens once, by hand, and the sha1
+# below is what a run can be pinned to.
+Here="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$Here" || exit 1
+command -v yue >/dev/null || { echo "no yue on PATH"; exit 1; }
+yue -c -s -o tab.lua tab.yue || exit 1
+echo "tab.lua  $(shasum -a1 tab.lua | cut -c1-12)  $(wc -l < tab.lua) lines"
