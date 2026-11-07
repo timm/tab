@@ -964,6 +964,37 @@ eg["--logfmt"] = (): nil ->
   print s
   ok s, "go=nb seed=1\nsub\n  a=1 b=2"
 
+-- The module's surface at the foot of this file is written out by
+-- hand, which reads well but drifts: add a function, forget the
+-- list, and `require "tab"` quietly lacks it.  So check it, from the
+-- source text -- textual on purpose, because the table does not
+-- exist yet while this file is still running.  Every top-level name
+-- must be exported or named below as deliberately private.  `Hist`
+-- and `Drawn` are scratch, `main` is the entry test, and the rest
+-- are tree internals that nothing outside this file calls.
+eg["--api"] = (): nil ->
+  priv = {w, true for w in (" Drawn Hist ThatC ThisC binRows clog " ..
+          "ent hist main sc tally ")\gmatch "%S+"}
+  src = debug.getinfo(1, "S").source\gsub("^@", "")
+  src = src\gsub("%.lua$", ".yue")
+  defs, want, tail, str = {}, {}, false, false
+  for line in io.lines src
+    tail = true if line\find "^setmetatable"
+    if tail                       -- the exported table: `:name` or
+      want[w] = true for w in line\gmatch "[:,]%s*(%a[%w_]*)"
+    elseif str                    -- `, name`, one list, last thing here
+      str = false if line\find "%]%]"
+    else                          -- a definition starts at column 0 and
+      lhs = line\match "^([^=]-)%s*=[^=]"    -- has only names, commas
+      if lhs and lhs\find("^[%a_]") and not lhs\find "[^%w_,%s]"
+        defs[w] = true for w in lhs\gmatch "[%a_][%w_]*"
+      str = true if line\find("%[%[") and not line\find "%]%]"
+  gone = [k for k in pairs defs when not (want[k] or priv[k])]
+  dead = [k for k in pairs want when not defs[k]]
+  print fmt("%s exported, %s private", sum(want, -> 1), sum(priv, -> 1))
+  ok table.concat(sort(gone, lt), " "), ""      -- defined, not listed
+  ok table.concat(sort(dead, lt), " "), ""      -- listed, not defined
+
 halves = ->                    -- TAB; `the.file` as train and test TABs
   tbl = Tab the.file
   tr, te = tbl\split!

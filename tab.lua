@@ -1462,6 +1462,84 @@ eg["--logfmt"] = function()
   return nil
 end
 
+-- The module's surface at the foot of this file is written out by
+-- hand, which reads well but drifts: add a function, forget the
+-- list, and `require "tab"` quietly lacks it.  So check it, from the
+-- source text -- textual on purpose, because the table does not
+-- exist yet while this file is still running.  Every top-level name
+-- must be exported or named below as deliberately private.  `Hist`
+-- and `Drawn` are scratch, `main` is the entry test, and the rest
+-- are tree internals that nothing outside this file calls.
+eg["--api"] = function()
+  local priv
+  do
+    local _tbl_0 = { }
+    for w in (" Drawn Hist ThatC ThisC binRows clog " .. "ent hist main sc tally "):gmatch("%S+") do
+      _tbl_0[w] = true
+    end
+    priv = _tbl_0
+  end
+  local src = debug.getinfo(1, "S").source:gsub("^@", "")
+  src = src:gsub("%.lua$", ".yue")
+  local defs, want, tail, str = { }, { }, false, false
+  for line in io.lines(src) do
+    if line:find("^setmetatable") then
+      tail = true
+    end
+    if tail then
+      for w in line:gmatch("[:,]%s*(%a[%w_]*)") do
+        want[w] = true
+      end
+    elseif str then
+      if line:find("%]%]") then
+        str = false
+      end
+    else
+      local lhs = line:match("^([^=]-)%s*=[^=]")
+      if lhs and lhs:find("^[%a_]") and not lhs:find("[^%w_,%s]") then
+        for w in lhs:gmatch("[%a_][%w_]*") do
+          defs[w] = true
+        end
+      end
+      if line:find("%[%[") and not line:find("%]%]") then
+        str = true
+      end
+    end
+  end
+  local gone
+  do
+    local _accum_0 = { }
+    local _len_0 = 1
+    for k in pairs(defs) do
+      if not (want[k] or priv[k]) then
+        _accum_0[_len_0] = k
+        _len_0 = _len_0 + 1
+      end
+    end
+    gone = _accum_0
+  end
+  local dead
+  do
+    local _accum_0 = { }
+    local _len_0 = 1
+    for k in pairs(want) do
+      if not defs[k] then
+        _accum_0[_len_0] = k
+        _len_0 = _len_0 + 1
+      end
+    end
+    dead = _accum_0
+  end
+  print(fmt("%s exported, %s private", sum(want, function()
+    return 1
+  end), sum(priv, function()
+    return 1
+  end)))
+  ok(table.concat(sort(gone, lt), " "), "")
+  ok(table.concat(sort(dead, lt), " "), "")
+  return nil
+end
+
 halves = function()
   local tbl = Tab(the.file)
   local tr, te = tbl:split()
