@@ -11,6 +11,7 @@ from types import SimpleNamespace as o
 
 the = o(bins=7, fmt="%.2f", m=2, p=2, warm=10, go="rmeans",
         few=128, start=4, stop=20, seed=1234567891,
+        rng=1234567891,
         test="None", file="~/gits/moot/optimize/misc/auto93.csv")
 
 def value(x):
@@ -20,11 +21,9 @@ def value(x):
     try: return float(x)
     except ValueError: return x
 
-rng = None
 def rint(j):
-  global rng
-  rng = (16807 * (rng or the.seed)) % 2147483647
-  return 1 + int(j * rng / 2147483647)
+  the.rng = (16807 * the.rng) % 2147483647
+  return 1 + int(j * the.rng / 2147483647)
 
 def shuffle(u):
   u = u[:]
@@ -227,8 +226,6 @@ def acquire(tab, cap=None):
   return both.rows
 
 def acq():
-  global rng
-  rng = the.seed
   src = list(lines(the.file))
   tab = Tab(src[0], src[1:])
   def ys(rows):
@@ -257,10 +254,10 @@ def cli():
   for s in sys.argv[1:]:
     m = re.match(r"^([A-Za-z]\w*)=(.*)$", s)
     if m: setattr(the, m.group(1), value(m.group(2)))
-    elif s in slow: slow[s]()
+    elif s in slow: the.rng = the.seed; slow[s]()
     else: the.file = s
   return the
 
 if __name__ == "__main__":
-  cli()
+  the.rng = cli().seed
   if the.go in slow: slow[the.go]()
