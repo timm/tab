@@ -5,7 +5,7 @@ usage: python3 inc.py [name=value | nb | rmeans | file.csv ...]
 (c) 2026 Tim Menzies <timm@ieee.org> MIT license."""
 
 import sys, os, re
-from math import exp, log
+from math import exp, log, sqrt
 from types import SimpleNamespace as o
 
 the = o(bins=7, fmt="%.2f", m=2, p=2, warm=10, go="rmeans",
@@ -19,8 +19,8 @@ def value(x):
     except ValueError: return x
 
 def Col(txt):
-  return {} if txt[:1].islower() else \
-         (0, 0, 0, 0 if txt.endswith("-") else 1)
+  return (0, 0, 0, 0 if txt.endswith("-") else 1) \
+         if txt[:1].isupper() else {}
 
 def add(col, v, inc=1):
   if v == "?": return col
@@ -39,7 +39,7 @@ def n(col):
   return sum(col.values()) if type(col) is dict else col[0]
 
 def div(num):
-  return 0 if num[0] < 2 else (max(num[2], 0) / (num[0] - 1)) ** .5
+  return 0 if num[0] < 2 else sqrt(max(num[2], 0) / (num[0] - 1))
 
 def norm(col, v):
   if v == "?" or type(col) is dict: return v
