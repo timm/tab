@@ -1,178 +1,77 @@
-local the, slow, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, NBI, RMI, Col, Sym, Num, Tab, lines, eat, nvals, update, err, Nbi, Rmi, learn, report, new, values, cli, map, sum, same, lt, sort, order, o, print, fmt, main
-the, slow = { }, { }
-help = [[inc.yue: incremental nb + rmeans, scored prequentially.
-(c) 2026 Tim Menzies <timm@ieee.org> MIT license.
-
-usage: yue inc.yue [name=value | action | file.csv ...]
-
-flags:
-  bins=7           numeric columns get this many bins
-  fmt=%.2f         how a fraction is printed
-  m=2              m-estimate: prior weight for a thin bin
-  p=2              minkowski coefficient
-  warm=10          rows seen before a guess is scored
-  test=None        held-out csv (None: train only)
-  file=~/gits/moot/optimize/misc/auto93.csv
-
-actions:
-  go=nb            incremental naive Bayes
-  go=rmeans        incremental range means]]
-floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
-abs, min, max = math.abs, math.min, math.max
-TAB, NUM, SYM, NBI, RMI = { }, { }, { }, { }, { }
-Col = function(txt, at)
-	return (txt:find("^%u") and Num or Sym)(txt, at)
+local abs, exp, floor, huge, log, max, min, sqrt, NUM, the, value, lt, sort, sortBy, sum, rint, shuffle, take, lines, Num, isNum, Col, add, n, div, norm, bin, argmax, mid, mids, nvals, Tab, addRow, ydist, xdist, update, err, learn, Nbi, Rmi, acquire, acq, fmt, report, slow, cli, main
+abs, exp, floor, huge = math.abs, math.exp, math.floor, math.huge
+log, max, min, sqrt = math.log, math.max, math.min, math.sqrt
+NUM = { }
+the = {
+	bins = 7,
+	fmt = "%.2f",
+	m = 2,
+	p = 2,
+	warm = 10,
+	go = "rmeans",
+	few = 128,
+	start = 4,
+	stop = 20,
+	seed = 1234567891,
+	rng = 1234567891,
+	test = "None",
+	file = "~/gits/moot/optimize/misc/auto93.csv"
+}
+value = function(s)
+	return tonumber(s) or s:match("^%s*(.-)%s*$")
 end
-Sym = function(txt, at)
-	return new(SYM, {
-		txt = txt or "S",
-		at = at or 0,
-		n = 0,
-		has = { },
-		cl = 0
-	})
+lt = function(a, b)
+	return a < b
 end
-SYM.add = function(self, v, inc)
-	if not (v == "?") then
-		inc = inc or 1
-		self.n = self.n + inc
-		local c = self.has[v] or 0
-		if c > 0 then
-			self.cl = self.cl - (c * log(c))
-		end
-		c = c + inc
-		if c <= 0 then
-			self.has[v] = nil
-		else
-			self.has[v] = c
-			self.cl = self.cl + (c * log(c))
-		end
+sort = function(u, fn)
+	return table.sort(u, fn) or u
+end
+sortBy = function(u, fn)
+	local key, was = { }, { }
+	for at, v in ipairs(u) do
+		key[v], was[v] = fn(v), at
 	end
-	return v
-end
-SYM.div = function(self)
-	return self.n < 1 and 0 or max(0, log(self.n) - self.cl / self.n) / log(2)
-end
-SYM.mid = function(self)
-	local ks = { }
-	for v in pairs(self.has) do
-		ks[#ks + 1] = v
-	end
-	sort(ks, function(x, y)
-		return tostring(x) < tostring(y)
+	return sort(u, function(a, b)
+		return key[a] == key[b] and was[a] < was[b] or key[a] < key[b]
 	end)
-	local bk
-	local b = -1
-	for _, v in order(ks) do
-		if self.has[v] > b then
-			b, bk = self.has[v], v
+end
+sum = function(t, fn)
+	local s = 0
+	for k, v in pairs(t) do
+		s = s + fn(v, k)
+	end
+	return s
+end
+rint = function(j)
+	the.rng = (16807 * the.rng) % 2147483647
+	return 1 + floor(j * the.rng / 2147483647)
+end
+shuffle = function(u)
+	do
+		local _accum_0 = { }
+		local _len_0 = 1
+		for _, v in ipairs(u) do
+			_accum_0[_len_0] = v
+			_len_0 = _len_0 + 1
+		end
+		u = _accum_0
+	end
+	for j = #u, 2, -1 do
+		local k = rint(j)
+		u[j], u[k] = u[k], u[j]
+	end
+	return u
+end
+take = function(u, j1, j2)
+	local _accum_0 = { }
+	local _len_0 = 1
+	for j, v in ipairs(u) do
+		if j >= j1 and j <= j2 then
+			_accum_0[_len_0] = v
+			_len_0 = _len_0 + 1
 		end
 	end
-	return bk
-end
-SYM.norm = function(self, v)
-	return v
-end
-SYM.bin = function(self, v)
-	return v
-end
-SYM.nVals = function(self)
-	return max(2, sum(self.has, function()
-		return 1
-	end))
-end
-Num = function(txt, at)
-	return new(NUM, {
-		txt = txt or "N",
-		at = at or 0,
-		n = 0,
-		mu = 0,
-		m2 = 0,
-		w = ((txt or ""):find("%-$") and 0 or 1)
-	})
-end
-NUM.add = function(self, v, inc)
-	if not (v == "?") then
-		inc = inc or 1
-		self.n = self.n + inc
-		if self.n <= 0 then
-			self.n, self.mu, self.m2 = 0, 0, 0
-		else
-			local d = v - self.mu
-			self.mu = self.mu + (inc * d / self.n)
-			self.m2 = self.m2 + (inc * d * (v - self.mu))
-		end
-	end
-	return v
-end
-NUM.div = function(self)
-	return self.n < 2 and 0 or sqrt(max(self.m2, 0) / (self.n - 1))
-end
-NUM.mid = function(self)
-	return self.mu
-end
-NUM.bin = function(self, v)
-	if v == "?" then
-		return v
-	end
-	local b = 1 + floor(the.bins * self:norm(v))
-	return b > the.bins and the.bins or b
-end
-NUM.norm = function(self, v)
-	if v == "?" then
-		return v
-	end
-	local z = (v - self.mu) / (self:div() + 1e-32)
-	z = z > 3 and 3 or (z < -3 and -3 or z)
-	return 1 / (1 + exp(-1.7 * z))
-end
-Tab = function(src)
-	local i = new(TAB, {
-		rows = { },
-		names = { },
-		cols = { },
-		x = { },
-		y = { }
-	})
-	for _, row in order((src or { })) do
-		i:add(row)
-	end
-	return i
-end
-TAB.add = function(self, row)
-	if #self.cols == 0 then
-		return self:head(row)
-	end
-	self.rows[#self.rows + 1] = row
-	for _, col in order(self.cols) do
-		col:add(row[col.at])
-	end
-	return row
-end
-TAB.head = function(self, names)
-	self.names = names
-	for at, txt in order(names) do
-		local col = Col(txt, at)
-		self.cols[#self.cols + 1] = col
-		if not txt:find("X$") then
-			if txt:find("[-+!]$") then
-				self.y[#self.y + 1] = col
-				if txt:find("!$") then
-					self.klass = col
-				end
-			else
-				self.x[#self.x + 1] = col
-			end
-		end
-	end
-	return nil
-end
-TAB.ydist = function(self, row)
-	local fn
-	fn = function(col)
-		return abs(col:norm(row[col.at]) - col.w) ^ the.p
-	end
-	return (sum(self.y, fn) / #self.y) ^ (1 / the.p)
+	return _accum_0
 end
 lines = function(file)
 	local path = file:gsub("^~", os.getenv("HOME") or "~")
@@ -181,226 +80,430 @@ lines = function(file)
 		for line in f do
 			local s = line:match("^%s*(.-)%s*$")
 			if s ~= "" and s:sub(1, 1) ~= "#" then
-				return values(s)
+				local _accum_0 = { }
+				local _len_0 = 1
+				for v in (s .. ","):gmatch("(.-),") do
+					_accum_0[_len_0] = value(v)
+					_len_0 = _len_0 + 1
+				end
+				return _accum_0
 			end
 		end
 	end
 end
-eat = function(i, row)
-	local _list_0 = i.cols
-	for _index_0 = 1, #_list_0 do
-		local col = _list_0[_index_0]
-		col:add(row[col.at])
+Num = function(w)
+	return setmetatable({
+		0,
+		0,
+		0,
+		w or 1
+	}, NUM)
+end
+isNum = function(col)
+	return getmetatable(col) == NUM
+end
+Col = function(txt)
+	return txt:find("^%u") and Num(txt:find("%-$") and 0 or 1) or { }
+end
+add = function(col, v, inc)
+	if inc == nil then
+		inc = 1
 	end
+	if v == "?" then
+		return col
+	end
+	if not isNum(col) then
+		local c = (col[v] or 0) + inc
+		col[v] = c > 0 and c or nil
+		return col
+	end
+	if col[1] + inc <= 0 then
+		col[1], col[2], col[3] = 0, 0, 0
+	else
+		local _update_0 = 1
+		col[_update_0] = col[_update_0] + inc
+		local d = v - col[2]
+		local _update_1 = 2
+		col[_update_1] = col[_update_1] + (inc * d / col[1])
+		local _update_2 = 3
+		col[_update_2] = col[_update_2] + (inc * d * (v - col[2]))
+	end
+	return col
+end
+n = function(col)
+	return isNum(col) and col[1] or sum(col, function(v)
+		return v
+	end)
+end
+div = function(num)
+	return num[1] < 2 and 0 or sqrt(max(num[3], 0) / (num[1] - 1))
+end
+norm = function(col, v)
+	if v == "?" or not isNum(col) then
+		return v
+	end
+	local z = (v - col[2]) / (div(col) + 1e-32)
+	return 1 / (1 + exp(-1.7 * max(-3, min(3, z))))
+end
+bin = function(col, v)
+	if v == "?" or not isNum(col) then
+		return v
+	end
+	return min(the.bins, 1 + floor(the.bins * norm(col, v)))
+end
+local _anon_func_0 = function(pairs, t)
+	local _accum_0 = { }
+	local _len_0 = 1
+	for k in pairs(t) do
+		_accum_0[_len_0] = k
+		_len_0 = _len_0 + 1
+	end
+	return _accum_0
+end
+argmax = function(t, fn)
+	local out
+	local b = -huge
+	for _, k in ipairs(sort(_anon_func_0(pairs, t), function(x, y)
+		return tostring(x) < tostring(y)
+	end)) do
+		local v = fn(k)
+		if v > b then
+			b, out = v, k
+		end
+	end
+	return out
+end
+mid = function(col)
+	return isNum(col) and col[2] or argmax(col, function(k)
+		return col[k]
+	end)
+end
+mids = function(tab)
+	local u = { }
+	for at = 1, #tab.cols do
+		u[at] = mid(tab.cols[at])
+	end
+	return u
 end
 nvals = function(col)
-	if col.it == NUM then
-		return the.bins
-	end
-	return col:nVals()
+	return isNum(col) and the.bins or max(2, sum(col, function()
+		return 1
+	end))
 end
-update = function(i, row)
-	eat(i.tab, row)
-	local y = i:want(row)
+Tab = function(names, rows)
+	local tab = {
+		names = names,
+		rows = { },
+		cols = { },
+		x = { },
+		y = { }
+	}
+	for at, txt in ipairs(names) do
+		tab.cols[at] = Col(txt)
+		if txt:find("X$") then
+			goto _continue_0
+		end
+		local u = txt:find("[-+!]$") and tab.y or tab.x
+		u[#u + 1] = at
+		if txt:find("!$") then
+			tab.klass = at
+		end
+		::_continue_0::
+	end
+	for _, row in ipairs(rows or { }) do
+		addRow(tab, row)
+	end
+	return tab
+end
+addRow = function(tab, row, inc, keep)
+	if inc == nil then
+		inc = 1
+	end
+	if keep == nil then
+		keep = true
+	end
+	if keep and inc > 0 then
+		tab.rows[#tab.rows + 1] = row
+	end
+	for at = 1, #tab.cols do
+		tab.cols[at] = add(tab.cols[at], row[at], inc)
+	end
+	return row
+end
+ydist = function(tab, row)
+	local c = tab.cols
+	local f
+	f = function(at)
+		return abs(norm(c[at], row[at]) - c[at][4]) ^ the.p
+	end
+	return (sum(tab.y, f) / #tab.y) ^ (1 / the.p)
+end
+xdist = function(tab, r1, r2)
+	local d = 0
+	for _, at in ipairs(tab.x) do
+		local a, b, col = r1[at], r2[at], tab.cols[at]
+		if a == "?" and b == "?" then
+			d = d + 1
+		elseif not isNum(col) then
+			d = d + (a == b and 0 or 1)
+		else
+			a, b = norm(col, a), norm(col, b)
+			if a == "?" then
+				a = b > .5 and 0 or 1
+			end
+			if b == "?" then
+				b = a > .5 and 0 or 1
+			end
+			d = d + (abs(a - b) ^ the.p)
+		end
+	end
+	return (d / #tab.x) ^ (1 / the.p)
+end
+update = function(model, row)
+	local t = model.tab
+	for at = 1, #t.cols do
+		t.cols[at] = add(t.cols[at], row[at])
+	end
+	local y = model.want(row)
 	if y == "?" then
 		return
 	end
-	i:caught(y)
-	local _list_0 = i.tab.x
-	for _index_0 = 1, #_list_0 do
-		local col = _list_0[_index_0]
-		local b = col:bin(row[col.at])
+	model.caught(y)
+	for _, at in ipairs(t.x) do
+		local b = bin(t.cols[at], row[at])
 		if b ~= "?" then
-			i:add1(col, b, y)
+			model.add1(at, b, y)
 		end
 	end
 end
-err = function(i, row)
-	local want, got = i:want(row), i:guess(row)
+err = function(model, row)
+	local want, got = model.want(row), model.guess(row)
 	if want == "?" or got == nil then
 		return "?"
 	end
-	return i:loss(want, got)
-end
-Nbi = function(names)
-	return new(NBI, {
-		tab = Tab({
-			names
-		}),
-		subs = { }
-	})
-end
-NBI.want = function(self, row)
-	return row[self.tab.klass.at]
-end
-NBI.caught = function(self, y) end
-NBI.add1 = function(self, col, b, k)
-	local sub = self.subs[k]
-	if not sub then
-		sub = { }
-		local _list_0 = self.tab.x
-		for _index_0 = 1, #_list_0 do
-			local c = _list_0[_index_0]
-			sub[c.at] = Sym()
-		end
-		self.subs[k] = sub
-	end
-	return sub[col.at]:add(b)
-end
-NBI.like = function(self, k, sub, row)
-	local kl = self.tab.klass
-	local s = log(((kl.has[k] or 0) + the.m) / (kl.n + the.m * nvals(kl)))
-	local _list_0 = self.tab.x
-	for _index_0 = 1, #_list_0 do
-		local col = _list_0[_index_0]
-		local v = row[col.at]
-		if v ~= "?" then
-			local b, sym = col:bin(v), sub[col.at]
-			s = s + log(((sym.has[b] or 0) + the.m) / (sym.n + the.m * nvals(col)))
-		end
-	end
-	return s
-end
-NBI.klasses = function(self)
-	local ks = { }
-	for k in pairs(self.subs) do
-		ks[#ks + 1] = k
-	end
-	return sort(ks, function(a, b)
-		return tostring(a) < tostring(b)
-	end)
-end
-NBI.guess = function(self, row)
-	if not next(self.subs) then
-		return nil
-	end
-	local bk
-	local b = -math.huge
-	for _, k in order(self:klasses()) do
-		local v = self:like(k, self.subs[k], row)
-		if v > b then
-			b, bk = v, k
-		end
-	end
-	return bk
-end
-NBI.loss = function(self, want, got)
-	return want == got and 0 or 1
-end
-Rmi = function(names)
-	local i = new(RMI, {
-		tab = Tab({
-			names
-		}),
-		has = { }
-	})
-	i.goal = #i.tab.y == 1 and i.tab.y[1].it == NUM and i.tab.y[1]
-	i.all = i.goal or Num()
-	return i
-end
-RMI.want = function(self, row)
-	if self.goal then
-		return row[self.goal.at]
-	end
-	return self.tab:ydist(row)
-end
-RMI.caught = function(self, y)
-	if not self.goal then
-		return self.all:add(y)
-	end
-end
-RMI.add1 = function(self, col, b, y)
-	local t = self.has[col.at] or { }
-	self.has[col.at] = t
-	t[b] = t[b] or Num()
-	return t[b]:add(y)
-end
-RMI.like = function(self, col, row)
-	local bins = self.has[col.at]
-	local v = bins and bins[col:bin(row[col.at])]
-	if not v then
-		return
-	end
-	local w = self.all:div() ^ 2 - sum(bins, function(u)
-		return u.n / self.all.n * u:div() ^ 2
-	end)
-	if w > 0 then
-		return (v.n * v.mu + the.m * self.all.mu) / (v.n + the.m), w
-	end
-end
-RMI.guess = function(self, row)
-	if self.all.n == 0 then
-		return nil
-	end
-	local s, w = 0, 0
-	local _list_0 = self.tab.x
-	for _index_0 = 1, #_list_0 do
-		local col = _list_0[_index_0]
-		local g, wt = self:like(col, row)
-		if g then
-			s, w = s + wt * g, w + wt
-		end
-	end
-	return w > 0 and s / w or self.all.mu
-end
-RMI.loss = function(self, want, got)
-	return abs(got - want)
+	return model.loss(want, got)
 end
 learn = function(make)
 	local m, post
-	local n, pre = 0, Num()
+	local pre, j = Num(), 0
 	for row in lines(the.file) do
-		n = n + 1
-		if n == 1 then
+		j = j + 1
+		if j == 1 then
 			m = make(row)
 		else
-			if n > the.warm + 1 then
-				pre:add(err(m, row))
+			if j > the.warm + 1 then
+				pre = add(pre, err(m, row))
 			end
 			update(m, row)
 		end
 	end
 	if the.test and the.test ~= "None" then
-		post, n = Num(), 0
+		post, j = Num(), 0
 		for row in lines(the.test) do
-			n = n + 1
-			if n > 1 then
-				post:add(err(m, row))
+			j = j + 1
+			if j > 1 then
+				post = add(post, err(m, row))
 			end
 		end
 	end
 	return m, pre, post
 end
+local _anon_func_1 = function(ipairs, nb)
+	local _tbl_0 = { }
+	for _, j in ipairs(nb.tab.x) do
+		_tbl_0[j] = { }
+	end
+	return _tbl_0
+end
+Nbi = function(names)
+	local nb = {
+		tab = Tab(names),
+		subs = { }
+	}
+	nb.want = function(row)
+		return row[nb.tab.klass]
+	end
+	nb.caught = function() end
+	nb.add1 = function(at, b, k)
+		local _obj_0 = nb.subs
+		_obj_0[k] = _obj_0[k] or _anon_func_1(ipairs, nb)
+		return add(nb.subs[k][at], b)
+	end
+	nb.like = function(k, sub, row)
+		local kl = nb.tab.cols[nb.tab.klass]
+		local s = log(((kl[k] or 0) + the.m) / (n(kl) + the.m * nvals(kl)))
+		for _, at in ipairs(nb.tab.x) do
+			local v = row[at]
+			if v ~= "?" then
+				local col = nb.tab.cols[at]
+				s = s + log(((sub[at][bin(col, v)] or 0) + the.m) / (n(sub[at]) + the.m * nvals(col)))
+			end
+		end
+		return s
+	end
+	nb.guess = function(row)
+		return next(nb.subs) and argmax(nb.subs, function(k)
+			return nb.like(k, nb.subs[k], row)
+		end) or nil
+	end
+	nb.loss = function(want, got)
+		return want == got and 0 or 1
+	end
+	return nb
+end
+Rmi = function(names)
+	local rm = {
+		tab = Tab(names),
+		has = { }
+	}
+	local ys = rm.tab.y
+	rm.goal = #ys == 1 and isNum(rm.tab.cols[ys[1]]) and ys[1] or nil
+	rm.all = not rm.goal and Num() or nil
+	rm.want = function(row)
+		return rm.goal and row[rm.goal] or ydist(rm.tab, row)
+	end
+	rm.caught = function(y)
+		if not rm.goal then
+			rm.all = add(rm.all, y)
+		end
+	end
+	rm.tot = function()
+		return rm.goal and rm.tab.cols[rm.goal] or rm.all
+	end
+	rm.add1 = function(at, b, y)
+		local t = rm.has[at] or { }
+		rm.has[at] = t
+		t[b] = add((t[b] or Num()), y)
+	end
+	rm.like = function(at, row)
+		local bins, tot = rm.has[at], rm.tot()
+		local v = bins and bins[bin(rm.tab.cols[at], row[at])]
+		if not v then
+			return
+		end
+		local w = div(tot) ^ 2 - sum(bins, function(u)
+			return u[1] / tot[1] * div(u) ^ 2
+		end)
+		if w > 0 then
+			return (v[1] * v[2] + the.m * tot[2]) / (v[1] + the.m), w
+		end
+	end
+	rm.guess = function(row)
+		local tot = rm.tot()
+		if tot[1] == 0 then
+			return nil
+		end
+		local s, w = 0, 0
+		for _, at in ipairs(rm.tab.x) do
+			local g, wt = rm.like(at, row)
+			if g then
+				s, w = s + wt * g, w + wt
+			end
+		end
+		return w > 0 and s / w or tot[2]
+	end
+	rm.loss = function(want, got)
+		return abs(got - want)
+	end
+	return rm
+end
+local _anon_func_2 = function(table, the, todo)
+	local _accum_0 = { }
+	local _len_0 = 1
+	for _ = 1, the.start do
+		_accum_0[_len_0] = table.remove(todo)
+		_len_0 = _len_0 + 1
+	end
+	return _accum_0
+end
+acquire = function(tab, cap)
+	cap = cap or the.stop
+	local todo = take(shuffle(tab.rows), 1, the.few)
+	local kid
+	kid = function(rows)
+		return Tab(tab.names, rows)
+	end
+	local both = kid(_anon_func_2(table, the, todo))
+	sortBy(both.rows, function(r)
+		return ydist(both, r)
+	end)
+	local k = floor(the.start ^ .5)
+	local best = kid(take(both.rows, 1, k))
+	local rest = kid(take(both.rows, k + 1, huge))
+	while #todo > 0 and #both.rows < cap do
+		local rmid, bmid = mids(rest), mids(best)
+		sortBy(todo, function(z)
+			return xdist(tab, z, rmid) - xdist(tab, z, bmid)
+		end)
+		addRow(best, addRow(both, table.remove(todo)))
+		sortBy(best.rows, function(r)
+			return ydist(both, r)
+		end)
+		if #best.rows > (#both.rows) ^ .5 then
+			addRow(rest, addRow(best, table.remove(best.rows), -1, false))
+		end
+	end
+	return both.rows
+end
+local _anon_func_3 = function(ipairs, rows, tab, ydist)
+	local _accum_0 = { }
+	local _len_0 = 1
+	for _, r in ipairs(rows) do
+		_accum_0[_len_0] = ydist(tab, r)
+		_len_0 = _len_0 + 1
+	end
+	return _accum_0
+end
+acq = function()
+	local src
+	do
+		local _accum_0 = { }
+		local _len_0 = 1
+		for row in lines(the.file) do
+			_accum_0[_len_0] = row
+			_len_0 = _len_0 + 1
+		end
+		src = _accum_0
+	end
+	local tab = Tab(src[1], take(src, 2, huge))
+	local ys
+	ys = function(rows)
+		local u = sort(_anon_func_3(ipairs, rows, tab, ydist), lt)
+		local s = 0
+		for _, v in ipairs(u) do
+			s = s + v
+		end
+		return ("%s/%s"):format(fmt(u[1]), fmt(s / #u))
+	end
+	local got = acquire(tab)
+	local rand = ys(take(shuffle(tab.rows), 1, #got))
+	return print((":acquire %s n=%s best=%s rand=%s all=%s"):format(the.file, #got, ys(got), rand, ys(tab.rows)))
+end
+fmt = function(x)
+	return x == floor(x) and tostring(floor(x)) or the.fmt:format(x)
+end
 report = function(what, pre, post)
-	print(fmt(":prequential %s n=%s %s=%s", the.file, pre.n, what, o(pre.mu)))
+	print((":prequential %s n=%s %s=%s"):format(the.file, pre[1], what, fmt(pre[2])))
 	if post then
-		return print(fmt(":frozen %s n=%s %s=%s", the.test, post.n, what, o(post.mu)))
+		return print((":frozen %s n=%s %s=%s"):format(the.test, post[1], what, fmt(post[2])))
 	end
 end
-slow.nb = function()
-	return report("err", select(2, learn(Nbi)))
-end
-slow.rmeans = function()
-	return report("mae", select(2, learn(Rmi)))
-end
-new = function(meta, i)
-	meta.__index, meta.it, meta.__tostring = meta, meta, o
-	return setmetatable(i, meta)
-end
-values = function(s)
-	local u = { }
-	for s1 in (s .. ","):gmatch("(.-),") do
-		local v = s1:match("^%s*(.-)%s*$")
-		u[#u + 1] = tonumber(v) or v
-	end
-	return u
-end
+slow = {
+	nb = function()
+		return report("err", select(2, learn(Nbi)))
+	end,
+	rmeans = function()
+		return report("mae", select(2, learn(Rmi)))
+	end,
+	acquire = acq
+}
 cli = function()
-	for _, s in order(arg) do
-		local k, v = s:match("^(%a%w*)=(.*)$")
+	for _, s in ipairs(arg or { }) do
+		local k, v = s:match("^(%a[%w_]*)=(.*)$")
 		if k then
-			the[k] = values(v)[1]
+			the[k] = value(v)
 		elseif slow[s] then
+			the.rng = the.seed
 			slow[s]()
 		else
 			the.file = s
@@ -408,118 +511,52 @@ cli = function()
 	end
 	return the
 end
-map = function(t, fn)
-	local u = { }
-	for k, v in ipairs(t) do
-		u[#u + 1] = fn(v, k)
-	end
-	return u
-end
-sum = function(t, fn)
-	local n = 0
-	for k, v in pairs(t) do
-		n = n + fn(v, k)
-	end
-	return n
-end
-same = function(x)
-	return x
-end
-lt = function(a, b)
-	return a < b
-end
-sort = function(t, fn)
-	if fn and type(fn) ~= "function" then
-		local k = fn
-		fn = function(a, b)
-			return a[k] < b[k]
-		end
-	end
-	table.sort(t, fn)
-	return t
-end
-order = function(t, fn)
-	if not fn then
-		return ipairs(t)
-	end
-	return ipairs(sort(map(t, same), fn))
-end
-o = function(x)
-	if type(x) ~= "table" then
-		if type(x) ~= "number" then
-			return tostring(x)
-		end
-		return tostring(x == floor(x) and floor(x) or the.fmt:format(x))
-	end
-	local u = { }
-	if #x > 0 then
-		for _, v in ipairs(x) do
-			u[#u + 1] = o(v)
-		end
-	else
-		for k, v in pairs(x) do
-			if k ~= "it" and type(v) ~= "function" then
-				u[#u + 1] = o(k) .. "=" .. o(v)
-			end
-		end
-	end
-	return "{" .. table.concat((#x > 0 and u or sort(u, lt)), " ") .. "}"
-end
-print = function(...)
-	local out = { }
-	for j = 1, select("#", ...) do
-		out[j] = o((select(j, ...)))
-	end
-	io.write(table.concat(out, "\t"), "\n")
-	return nil
-end
-fmt = function(s, ...)
-	return s:format(...)
-end
-for k, v in help:gmatch("\n%s+(%a+)=(%S+)") do
-	the[k] = values(v)[1]
-end
 main = (arg and arg[0]) or ""
 if main:find("inc%.yue$") or main:find("inc%.lua$") then
-	cli()
-	if the.go and slow[the.go] then
+	the.rng = cli().seed
+	if slow[the.go] then
 		slow[the.go]()
 	end
 end
 return setmetatable({
 	the = the,
-	help = help,
 	slow = slow,
-	TAB = TAB,
 	NUM = NUM,
-	SYM = SYM,
-	NBI = NBI,
-	RMI = RMI,
-	Col = Col,
-	Sym = Sym,
 	Num = Num,
-	Tab = Tab,
-	Nbi = Nbi,
-	Rmi = Rmi,
-	lines = lines,
-	eat = eat,
+	isNum = isNum,
+	Col = Col,
+	add = add,
+	n = n,
+	div = div,
+	norm = norm,
+	bin = bin,
+	mid = mid,
+	mids = mids,
 	nvals = nvals,
+	argmax = argmax,
+	Tab = Tab,
+	addRow = addRow,
+	ydist = ydist,
+	xdist = xdist,
 	update = update,
 	err = err,
 	learn = learn,
-	report = report,
-	new = new,
-	values = values,
-	cli = cli,
-	map = map,
-	sum = sum,
-	same = same,
+	Nbi = Nbi,
+	Rmi = Rmi,
+	acquire = acquire,
+	acq = acq,
+	value = value,
 	lt = lt,
 	sort = sort,
-	order = order,
-	o = o,
-	print = print,
-	fmt = fmt
+	sortBy = sortBy,
+	sum = sum,
+	rint = rint,
+	shuffle = shuffle,
+	take = take,
+	lines = lines,
+	fmt = fmt,
+	report = report,
+	cli = cli
 }, {
 	__index = _G
 })

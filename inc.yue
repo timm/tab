@@ -1,393 +1,302 @@
--- <!--- vim: set ts=2 sw=2 sts=2 et cc=75 : -->
--- inc.yue: incremental nb + rmeans, standing on nothing.
---
--- Training is prequential: after `warm` rows, guess first, then
--- (always) update.  Early guesses are bad; that is just how it goes.
--- An optional test=file is scored with updates frozen, so these
--- learners can meet batch learners on the same external 80:20 split.
---
--- Self-contained, by request.  It used to open with `_ENV = require
--- "tab"`, which borrowed eighteen names.  Everything it borrowed is
--- now written out below: the columns, the table, and the handful of
--- helpers they lean on.  The cost is honest and worth stating -- the
--- column code here is a FOURTH copy, beside tab.lua, tab.py and
--- tab.yue, so a change to how a NUM bins or a SYM counts is now four
--- edits and three chances to forget one.  Only the parts a streaming
--- learner touches were copied: no tree, no forest, no cuts, no
--- splits, no rng.
---
--- usage: yue inc.yue go=nb     file=train.csv [test=hold.csv]
---        yue inc.yue go=rmeans file=train.csv [test=hold.csv]
+-- vim: set ts=2 sw=2 sts=2 et cc=70 :
+-- inc.yue: incremental nb + rmeans, scored prequentially.
+-- usage: yue inc.yue [name=value | nb | rmeans | acquire | file.csv]
+-- (c) 2026 Tim Menzies <timm@ieee.org> MIT license.
 
 local *
 
-the, slow = {}, {}
-help = [[
-inc.yue: incremental nb + rmeans, scored prequentially.
-(c) 2026 Tim Menzies <timm@ieee.org> MIT license.
+abs, exp, floor, huge = math.abs, math.exp, math.floor, math.huge
+log, max, min, sqrt = math.log, math.max, math.min, math.sqrt
+NUM = {}
 
-usage: yue inc.yue [name=value | action | file.csv ...]
+the = {bins: 7, fmt: "%.2f", m: 2, p: 2, warm: 10, go: "rmeans"
+       few: 128, start: 4, stop: 20, seed: 1234567891
+       rng: 1234567891
+       test: "None", file: "~/gits/moot/optimize/misc/auto93.csv"}
 
-flags:
-  bins=7           numeric columns get this many bins
-  fmt=%.2f         how a fraction is printed
-  m=2              m-estimate: prior weight for a thin bin
-  p=2              minkowski coefficient
-  warm=10          rows seen before a guess is scored
-  test=None        held-out csv (None: train only)
-  file=~/gits/moot/optimize/misc/auto93.csv
+value = (s) -> tonumber(s) or s\match "^%s*(.-)%s*$"
 
-actions:
-  go=nb            incremental naive Bayes
-  go=rmeans        incremental range means]]
+lt = (a, b) -> a < b
 
-floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
-abs, min, max = math.abs, math.min, math.max
+sort = (u, fn) -> table.sort(u, fn) or u
 
-TAB, NUM, SYM, NBI, RMI = {}, {}, {}, {}, {}
+sortBy = (u, fn) ->
+  key, was = {}, {}
+  key[v], was[v] = fn(v), at for at, v in ipairs u
+  sort u, (a, b) ->
+    key[a] == key[b] and was[a] < was[b] or key[a] < key[b]
 
--- ---- columns ----------------------------------------------------------
--- Copied from tab: a-z is a Sym, A-Z a Num, and both answer `add`,
--- `bin`, `norm`, `div` and `mid`, which is the whole interface a
--- streaming learner needs.
-Col = (txt, at) ->                -- SYM | NUM; a-z Sym; A-Z Num
-  (txt\find("^%u") and Num or Sym)(txt, at)
+sum = (t, fn) ->
+  s = 0
+  s += fn v, k for k, v in pairs t
+  s
 
-Sym = (txt, at) ->                -- SYM; counts of symbols in column `at`
-  new SYM, {txt: txt or "S", at: at or 0, n: 0, has: {}, cl: 0}
+rint = (j) ->
+  the.rng = (16807 * the.rng) % 2147483647
+  1 + floor(j * the.rng / 2147483647)
 
--- `@cl` is sum(c*log c) over the counts, kept up to date here so
--- `div` need not walk `@has` at all.  `pairs` has no order and float
--- addition is not associative, so a sum taken in hash order makes an
--- entropy's last bits turn on how the table laid itself out.
-SYM.add = (v, inc): v =>          -- value; `inc` more of `v` (-1 = less)
-  unless v == "?"
-    inc or= 1
-    @n += inc
-    c = @has[v] or 0
-    @cl -= c * log(c) if c > 0
-    c += inc
-    if c <= 0
-      @has[v] = nil
-    else
-      @has[v] = c
-      @cl += c * log(c)
+shuffle = (u) ->
+  u = [v for _, v in ipairs u]
+  for j = #u, 2, -1
+    k = rint j
+    u[j], u[k] = u[k], u[j]
+  u
 
--- H = -sum (c/n) log(c/n) = log n - (1/n) sum c log c, and `add`
--- already holds that inner sum, so this is arithmetic, not a walk.
-SYM.div = =>                      -- num; entropy, in bits
-  @n < 1 and 0 or max(0, log(@n) - @cl / @n) / log(2)
+take = (u, j1, j2) -> [v for j,v in ipairs u when j>=j1 and j<=j2]
 
-SYM.mid = =>                      -- value; the mode, ties on `tostring`
-  ks = {}
-  for v in pairs @has
-    ks[#ks + 1] = v
-  sort ks, (x, y) -> tostring(x) < tostring(y)
-  local bk                        -- `local`: assigned inside the loop
-  b = -1
-  for _, v in order ks
-    b, bk = @has[v], v if @has[v] > b
-  bk
-
-SYM.norm = (v) => v               -- value; a sym is its own norm
-SYM.bin = (v) => v                -- value; and its own bin
-
-SYM.nVals = =>                    -- int; values `@` has seen, at least 2
-  max 2, sum(@has, -> 1)          -- NOT cached: a stream keeps meeting
-                                  -- symbols it has not seen before
-Num = (txt, at) ->                -- NUM; Welford summary of column `at`
-  new NUM, {txt: txt or "N", at: at or 0, n: 0, mu: 0, m2: 0,
-            w: ((txt or "")\find("%-$") and 0 or 1)}
-
-NUM.add = (v, inc): v =>          -- value; `inc` more of `v`
-  unless v == "?"
-    inc or= 1
-    @n += inc
-    if @n <= 0
-      @n, @mu, @m2 = 0, 0, 0
-    else
-      d = v - @mu
-      @mu += inc * d / @n
-      @m2 += inc * d * (v - @mu)
-
-NUM.div = => @n < 2 and 0 or sqrt(max(@m2, 0) / (@n - 1))
-NUM.mid = => @mu                  -- num; the mean
-
-NUM.bin = (v) =>                  -- value; `v`'s bin, 1..`the.bins`
-  return v if v == "?"
-  b = 1 + floor(the.bins * @norm(v))
-  b > the.bins and the.bins or b
-
-NUM.norm = (v) =>                 -- value; `v` on a logistic cdf,
-  return v if v == "?"            -- clipped at three standard deviations
-  z = (v - @mu) / (@div! + 1e-32)
-  z = z > 3 and 3 or (z < -3 and -3 or z)
-  1 / (1 + exp(-1.7 * z))
-
--- ---- tables -----------------------------------------------------------
--- A rowless TAB: `@rows` is never filled here, because a stream has
--- no rows to keep.  What a TAB is for is the column list and what the
--- header said each column meant.
-Tab = (src) ->                    -- TAB from `src`: rows
-  i = new TAB, {rows: {}, names: {}, cols: {}, x: {}, y: {}}
-  i\add row for _, row in order (src or {})
-  i
-
-TAB.add = (row): row =>           -- row; the first `row` is the names
-  return @head(row) if #@cols == 0
-  @rows[#@rows + 1] = row
-  for _, col in order @cols
-    col\add row[col.at]
-
-TAB.head = (names): nil =>        -- read `names:row` as `@`'s columns:
-  @names = names                  -- X skip, -+! goals, ! the klass,
-  for at, txt in order names      -- - minimize
-    col = Col(txt, at)
-    @cols[#@cols + 1] = col
-    unless txt\find("X$")
-      if txt\find("[-+!]$")
-        @y[#@y + 1] = col
-        @klass = col if txt\find("!$")
-      else
-        @x[#@x + 1] = col
-
-TAB.ydist = (row) =>              -- num; `row`'s distance to heaven
-  fn = (col) -> abs(col\norm(row[col.at]) - col.w) ^ the.p
-  (sum(@y, fn) / #@y) ^ (1 / the.p)
-
--- ---- rows, one at a time ----------------------------------------------
-lines = (file) ->                 -- iterator; one value-row per call
+lines = (file) ->
   path = file\gsub "^~", os.getenv("HOME") or "~"
   f = io.lines path
   -> for line in f
     s = line\match "^%s*(.-)%s*$"
-    if s != "" and s\sub(1, 1) != "#" then return values s
+    if s != "" and s\sub(1, 1) != "#"
+      return [value v for v in (s .. ",")\gmatch "(.-),"]
 
--- ---- generic learner ---------------------------------------------------
--- A learner is a tab (a rowless TAB whose live cols norm and bin),
--- plus five verbs: want (a row's y), caught (y landed), add1 (one
--- binned x cell, conditioned on y), guess, and loss (one guess's
--- badness).  Given those, update and err are the same for everybody.
+-- -------------------------------------------------------------------
+Num = (w) -> setmetatable {0, 0, 0, w or 1}, NUM
+isNum = (col) -> getmetatable(col) == NUM
+Col = (txt) ->
+  txt\find("^%u") and Num(txt\find("%-$") and 0 or 1) or {}
 
-eat = (i, row) ->                 -- every col eats its cell (so bins
-  col\add row[col.at] for col in *i.cols   -- drift along)
+add = (col, v, inc = 1) ->
+  return col if v == "?"
+  unless isNum col
+    c = (col[v] or 0) + inc
+    col[v] = c > 0 and c or nil
+    return col
+  if col[1] + inc <= 0
+    col[1], col[2], col[3] = 0, 0, 0
+  else
+    col[1] += inc
+    d = v - col[2]
+    col[2] += inc * d / col[1]
+    col[3] += inc * d * (v - col[2])
+  col
 
-nvals = (col) ->                  -- values col might take, right now
-  return the.bins if col.it == NUM
-  col\nVals!
+n = (col) -> isNum(col) and col[1] or sum(col, (v) -> v)
 
-update = (i, row) ->              -- learn `row`: all cols, then the
-  eat i.tab, row                  -- y-conditioned bins
-  y = i\want row
-  return if y == "?"
-  i\caught y
-  for col in *i.tab.x
-    b = col\bin row[col.at]
-    i\add1 col, b, y if b != "?"
+div = (num) -> num[1] < 2 and 0 or sqrt max(num[3],0) / (num[1]-1)
 
-err = (i, row) ->                 -- one guess's badness, or "?" when
-  want, got = i\want(row), i\guess row      -- unscorable
-  return "?" if want == "?" or got == nil
-  i\loss want, got
+norm = (col, v) ->
+  return v if v == "?" or not isNum col
+  z = (v - col[2]) / (div(col) + 1e-32)
+  1 / (1 + exp(-1.7 * max(-3, min(3, z))))
 
--- ---- incremental naive bayes ------------------------------------------
-Nbi = (names) ->                  -- NBI; one Sym of bins per (klass, col)
-  new NBI, {tab: Tab({names}), subs: {}}
+bin = (col, v) ->
+  return v if v == "?" or not isNum col
+  min the.bins, 1 + floor(the.bins * norm(col, v))
 
-NBI.want = (row) => row[@tab.klass.at]
+argmax = (t, fn) ->
+  local out
+  b = -huge
+  for _, k in ipairs sort([k for k in pairs t], (x, y) ->
+                          tostring(x) < tostring(y))
+    v = fn k
+    b, out = v, k if v > b
+  out
 
--- A no-op, and spelled out rather than aliased to `same`: this is a
--- module-level assignment, and under `local *` every helper below is
--- still nil when this line runs.  The klass column, fed by `eat`,
--- has already caught the priors by the time anyone asks.
-NBI.caught = (y) =>
-NBI.add1 = (col, b, k) =>
-  sub = @subs[k]
-  unless sub
-    sub = {}
-    sub[c.at] = Sym! for c in *@tab.x
-    @subs[k] = sub
-  sub[col.at]\add b
+mid = (col) -> isNum(col) and col[2] or argmax(col, (k) -> col[k])
 
-NBI.like = (k, sub, row) =>       -- log P(k) + log P(row | k)
-  kl = @tab.klass
-  s = log ((kl.has[k] or 0) + the.m) / (kl.n + the.m * nvals kl)
-  for col in *@tab.x
-    v = row[col.at]
-    if v != "?"
-      b, sym = col\bin(v), sub[col.at]
-      s += log(((sym.has[b] or 0) + the.m) / (sym.n + the.m * nvals col))
-  s
-
--- Sorted keys and a strict `>`, so a tie goes to the first klass by
--- name and not to whatever `pairs` happened to reach first.  Same
--- reason as SYM.mid above: two runs must agree.
-NBI.klasses = =>                  -- list; `@subs`'s keys, sorted
-  ks = {}
-  for k in pairs @subs
-    ks[#ks + 1] = k
-  sort ks, (a, b) -> tostring(a) < tostring(b)
-
-NBI.guess = (row) =>              -- likeliest klass, nil if none seen
-  return nil unless next @subs
-  local bk
-  b = -math.huge
-  for _, k in order @klasses!
-    v = @like k, @subs[k], row
-    b, bk = v, k if v > b
-  bk
-
-NBI.loss = (want, got) => want == got and 0 or 1
-
--- ---- incremental range means ------------------------------------------
-Rmi = (names) ->                  -- RMI; one Num of y per (x col, bin)
-  i = new RMI, {tab: Tab({names}), has: {}}
-  i.goal = #i.tab.y == 1 and i.tab.y[1].it == NUM and i.tab.y[1]
-  i.all = i.goal or Num!          -- the goal col, fed by eat, catches y;
-  i                               -- ydist has no col, so then RMI catches
-
-RMI.want = (row) =>               -- the y: one NUM y's value, else
-  return row[@goal.at] if @goal   -- distance to heaven
-  @tab\ydist row
-
-RMI.caught = (y) => @all\add y unless @goal
-
-RMI.add1 = (col, b, y) =>
-  t = @has[col.at] or {}
-  @has[col.at] = t
-  t[b] = t[b] or Num!
-  t[b]\add y
-
-RMI.like = (col, row) =>          -- num,num; col's m-shrunk guess for
-  bins = @has[col.at]             -- row, and its worth: the variance
-  v = bins and bins[col\bin row[col.at]]      -- it cuts
-  return unless v
-  w = @all\div!^2 - sum bins, (u) -> u.n / @all.n * u\div!^2
-  if w > 0
-    (v.n * v.mu + the.m * @all.mu) / (v.n + the.m), w
-
-RMI.guess = (row) =>              -- worth-weighted mean of every
-  return nil if @all.n == 0       -- column's like
-  s, w = 0, 0
-  for col in *@tab.x
-    g, wt = @like col, row
-    if g then s, w = s + wt * g, w + wt
-  w > 0 and s / w or @all.mu
-
-RMI.loss = (want, got) => abs got - want
-
--- ---- prequential train, frozen test -----------------------------------
-learn = (make) ->                 -- model from the.file (guess-then-
-  local m, post                   -- update after warm); if the.test,
-  n, pre = 0, Num!                -- its score too, with no updates
-  for row in lines the.file
-    n += 1
-    if n == 1 then m = make row
-    else
-      pre\add err(m, row) if n > the.warm + 1
-      update m, row
-  if the.test and the.test != "None"
-    post, n = Num!, 0
-    for row in lines the.test
-      n += 1
-      post\add err(m, row) if n > 1
-  m, pre, post
-
-report = (what, pre, post) ->     -- one line per phase
-  print fmt ":prequential %s n=%s %s=%s", the.file, pre.n, what, o pre.mu
-  if post
-    print fmt ":frozen %s n=%s %s=%s", the.test, post.n, what, o post.mu
-
-slow.nb     = -> report "err", select 2, learn Nbi
-slow.rmeans = -> report "mae", select 2, learn Rmi
-
--- ---- misc -------------------------------------------------------------
-new = (meta, i) ->                -- connect instance `i` to class `meta`
-  meta.__index, meta.it, meta.__tostring = meta, meta, o
-  setmetatable i, meta
-
-values = (s) ->                   -- row; values from comma-separated `s`
+mids = (tab) ->
   u = {}
-  for s1 in (s .. ",")\gmatch("(.-),")
-    v = s1\match("^%s*(.-)%s*$")
-    u[#u + 1] = tonumber(v) or v
+  u[at] = mid tab.cols[at] for at = 1, #tab.cols
   u
 
-cli = ->                          -- dict; update `the` from the command
-  for _, s in order arg           -- line: a name=value, action, or file
-    k, v = s\match("^(%a%w*)=(.*)$")
+nvals = (col) -> isNum(col) and the.bins or max 2, sum(col, -> 1)
+
+-- -------------------------------------------------------------------
+Tab = (names, rows) ->
+  tab = {:names, rows: {}, cols: {}, x: {}, y: {}}
+  for at, txt in ipairs names
+    tab.cols[at] = Col txt
+    continue if txt\find "X$"
+    u = txt\find("[-+!]$") and tab.y or tab.x
+    u[#u + 1] = at
+    tab.klass = at if txt\find "!$"
+  addRow tab, row for _, row in ipairs rows or {}
+  tab
+
+addRow = (tab, row, inc = 1, keep = true) ->
+  tab.rows[#tab.rows + 1] = row if keep and inc > 0
+  tab.cols[at] = add tab.cols[at], row[at], inc for at = 1, #tab.cols
+  row
+
+ydist = (tab, row) ->
+  c = tab.cols
+  f = (at) -> abs(norm(c[at], row[at]) - c[at][4]) ^ the.p
+  (sum(tab.y, f) / #tab.y) ^ (1 / the.p)
+
+xdist = (tab, r1, r2) ->
+  d = 0
+  for _, at in ipairs tab.x
+    a, b, col = r1[at], r2[at], tab.cols[at]
+    if a == "?" and b == "?"
+      d += 1
+    elseif not isNum col
+      d += a == b and 0 or 1
+    else
+      a, b = norm(col, a), norm(col, b)
+      a = b > .5 and 0 or 1 if a == "?"
+      b = a > .5 and 0 or 1 if b == "?"
+      d += abs(a - b) ^ the.p
+  (d / #tab.x) ^ (1 / the.p)
+
+update = (model, row) ->
+  t = model.tab
+  t.cols[at] = add t.cols[at], row[at] for at = 1, #t.cols
+  y = model.want row
+  return if y == "?"
+  model.caught y
+  for _, at in ipairs t.x
+    b = bin t.cols[at], row[at]
+    model.add1 at, b, y if b != "?"
+
+err = (model, row) ->
+  want, got = model.want(row), model.guess row
+  return "?" if want == "?" or got == nil
+  model.loss want, got
+
+-- -------------------------------------------------------------------
+learn = (make) ->
+  local m, post
+  pre, j = Num!, 0
+  for row in lines the.file
+    j += 1
+    if j == 1
+      m = make row
+    else
+      pre = add pre, err(m, row) if j > the.warm + 1
+      update m, row
+  if the.test and the.test != "None"
+    post, j = Num!, 0
+    for row in lines the.test
+      j += 1
+      post = add post, err(m, row) if j > 1
+  m, pre, post
+
+Nbi = (names) ->
+  nb = {tab: Tab(names), subs: {}}
+  nb.want = (row) -> row[nb.tab.klass]
+  nb.caught = ->
+  nb.add1 = (at, b, k) ->
+    nb.subs[k] or= {j, {} for _, j in ipairs nb.tab.x}
+    add nb.subs[k][at], b
+  nb.like = (k, sub, row) ->
+    kl = nb.tab.cols[nb.tab.klass]
+    s = log(((kl[k] or 0) + the.m) / (n(kl) + the.m * nvals(kl)))
+    for _, at in ipairs nb.tab.x
+      v = row[at]
+      if v != "?"
+        col = nb.tab.cols[at]
+        s += log(((sub[at][bin(col, v)] or 0) + the.m) /
+                 (n(sub[at]) + the.m * nvals(col)))
+    s
+  nb.guess = (row) -> next(nb.subs) and
+    argmax(nb.subs, (k) -> nb.like k, nb.subs[k], row) or nil
+  nb.loss = (want, got) -> want == got and 0 or 1
+  nb
+
+Rmi = (names) ->
+  rm = {tab: Tab(names), has: {}}
+  ys = rm.tab.y
+  rm.goal = #ys == 1 and isNum(rm.tab.cols[ys[1]]) and ys[1] or nil
+  rm.all = not rm.goal and Num! or nil
+  rm.want = (row) ->
+    rm.goal and row[rm.goal] or ydist rm.tab, row
+  rm.caught = (y) -> rm.all = add(rm.all, y) unless rm.goal
+  rm.tot = -> rm.goal and rm.tab.cols[rm.goal] or rm.all
+  rm.add1 = (at, b, y) ->
+    t = rm.has[at] or {}
+    rm.has[at] = t
+    t[b] = add (t[b] or Num!), y
+  rm.like = (at, row) ->
+    bins, tot = rm.has[at], rm.tot!
+    v = bins and bins[bin rm.tab.cols[at], row[at]]
+    return unless v
+    w = div(tot) ^ 2 - sum bins, (u) -> u[1] / tot[1] * div(u) ^ 2
+    if w > 0
+      (v[1] * v[2] + the.m * tot[2]) / (v[1] + the.m), w
+  rm.guess = (row) ->
+    tot = rm.tot!
+    return nil if tot[1] == 0
+    s, w = 0, 0
+    for _, at in ipairs rm.tab.x
+      g, wt = rm.like at, row
+      s, w = s + wt * g, w + wt if g
+    w > 0 and s / w or tot[2]
+  rm.loss = (want, got) -> abs got - want
+  rm
+
+-- -------------------------------------------------------------------
+acquire = (tab, cap) ->
+  cap or= the.stop
+  todo = take shuffle(tab.rows), 1, the.few
+  kid = (rows) -> Tab tab.names, rows
+  both = kid [table.remove todo for _ = 1, the.start]
+  sortBy both.rows, (r) -> ydist both, r
+  k = floor the.start ^ .5
+  best = kid take both.rows, 1, k
+  rest = kid take both.rows, k + 1, huge
+  while #todo > 0 and #both.rows < cap
+    rmid, bmid = mids(rest), mids(best)
+    sortBy todo, (z) -> xdist(tab, z, rmid) - xdist(tab, z, bmid)
+    addRow best, addRow(both, table.remove todo)
+    sortBy best.rows, (r) -> ydist both, r
+    if #best.rows > (#both.rows) ^ .5
+      addRow rest, addRow(best, table.remove(best.rows), -1, false)
+  both.rows
+
+acq = ->
+  src = [row for row in lines the.file]
+  tab = Tab src[1], take(src, 2, huge)
+  ys = (rows) ->
+    u = sort [ydist(tab, r) for _, r in ipairs rows], lt
+    s = 0
+    s += v for _, v in ipairs u
+    "%s/%s"\format fmt(u[1]), fmt(s / #u)
+  got = acquire tab
+  rand = ys take shuffle(tab.rows), 1, #got
+  print ":acquire %s n=%s best=%s rand=%s all=%s"\format(
+        the.file, #got, ys(got), rand, ys tab.rows)
+
+fmt = (x) ->
+  x == floor(x) and tostring(floor x) or the.fmt\format x
+
+report = (what, pre, post) ->
+  print ":prequential %s n=%s %s=%s"\format the.file, pre[1], what,
+        fmt pre[2]
+  if post
+    print ":frozen %s n=%s %s=%s"\format the.test, post[1], what,
+          fmt post[2]
+
+slow = {
+  nb: -> report "err", select 2, learn Nbi
+  rmeans: -> report "mae", select 2, learn Rmi
+  acquire: acq}
+
+cli = ->
+  for _, s in ipairs arg or {}
+    k, v = s\match "^(%a[%w_]*)=(.*)$"
     if k
-      the[k] = values(v)[1]
+      the[k] = value v
     elseif slow[s]
+      the.rng = the.seed
       slow[s]!
     else
       the.file = s
   the
 
-map = (t, fn) ->                  -- list; `fn(v,k)` over `t`, nils dropped
-  u = {}
-  for k, v in ipairs t
-    u[#u + 1] = fn(v, k)
-  u
-
-sum = (t, fn) ->                  -- num; `fn(v,k)` over every item, added
-  n = 0
-  for k, v in pairs t
-    n += fn(v, k)
-  n
-
-same = (x) -> x
-lt = (a, b) -> a < b
-
-sort = (t, fn) ->                 -- list; `t` sorted in place, ascending
-  if fn and type(fn) != "function"      -- `fn`: comparator, or a key
-    k = fn
-    fn = (a, b) -> a[k] < b[k]
-  table.sort t, fn
-  t
-
-order = (t, fn) ->                -- fun; `ipairs(t)` (or of a sorted
-  return ipairs(t) unless fn          -- copy, given `fn`)
-  ipairs sort(map(t, same), fn)
-
-o = (x) ->                        -- str; `x` as text, fractions through
-  if type(x) != "table"           -- `the.fmt`
-    return tostring(x) if type(x) != "number"
-    return tostring(x == floor(x) and floor(x) or the.fmt\format(x))
-  u = {}
-  if #x > 0
-    for _, v in ipairs x
-      u[#u + 1] = o(v)
-  else
-    for k, v in pairs x
-      if k != "it" and type(v) != "function"
-        u[#u + 1] = o(k) .. "=" .. o(v)
-  "{" .. table.concat((#x > 0 and u or sort(u, lt)), " ") .. "}"
-
-print = (...): nil ->             -- print the lot, tab separated, via `o`
-  out = {}
-  for j = 1, select("#", ...)
-    out[j] = o((select(j, ...)))
-  io.write table.concat(out, "\t"), "\n"
-
-fmt = (s, ...) -> s\format ...
-
--- ---- start ------------------------------------------------------------
-for k, v in help\gmatch("\n%s+(%a+)=(%S+)")
-  the[k] = values(v)[1]
-
 main = (arg and arg[0]) or ""
 if main\find("inc%.yue$") or main\find("inc%.lua$")
-  cli!
-  slow[the.go]! if the.go and slow[the.go]
+  the.rng = cli!.seed
+  slow[the.go]! if slow[the.go]
 
--- One table, written out, so the module's surface is a list you can
--- read rather than "whatever the chunk happened to assign".
 setmetatable {
-    :the, :help, :slow
-    :TAB, :NUM, :SYM, :NBI, :RMI
-    :Col, :Sym, :Num, :Tab, :Nbi, :Rmi
-    :lines, :eat, :nvals, :update, :err, :learn, :report
-    :new, :values, :cli, :map, :sum, :same, :lt, :sort, :order
-    :o, :print, :fmt
+    :the, :slow, :NUM
+    :Num, :isNum, :Col, :add, :n, :div, :norm, :bin, :mid, :mids
+    :nvals, :argmax
+    :Tab, :addRow, :ydist, :xdist, :update, :err
+    :learn, :Nbi, :Rmi, :acquire, :acq
+    :value, :lt, :sort, :sortBy, :sum, :rint, :shuffle, :take, :lines
+    :fmt, :report, :cli
   }, {__index: _G}

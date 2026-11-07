@@ -1,0 +1,79 @@
+## yue.ssh -- a2ps style for this repo's yuescript
+##
+## Use:  a2ps -E yue tab.yue -o out.ps
+##
+## Yuescript is not lua: there is no `function` and no `end`, so
+## lua.ssh's one label rule (function NAME) never fires and a .yue
+## file printed as lua shows almost nothing.  Here a definition is
+## `name = (args) ->`, so the arrows are what carry the structure.
+
+style yue is
+written by "Tim Menzies <timm@ieee.org>"
+version is 0.1
+requires a2ps 4.12i
+
+documentation is
+  "Yuescript, plus this repo's metatables (ALLCAPS: NUM, SYM,"
+  "TAB, NBI, RMI, TREE, FOREST) and the constructors that make"
+  "them (Camel: Num, Sym, Col, Tab, Nbi, Rmi, Tree, Forest)."
+  ""
+  "A column-0 name is labelled: that is what a definition looks"
+  "like in yue.  -> and => are highlighted too; they open every"
+  "function body, and there is no `end` to close one."
+end documentation
+
+alphabets are
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789"
+
+case sensitive
+
+keywords in Keyword_strong are
+  and, break, "catch", class, "continue", do, else, elseif,
+  export, extends, false, for, from, global, "goto", if, import,
+  "in", local, macro, nil, not, or, "repeat", return, super,
+  switch, then, true, try, unless, until, using, when, while,
+  with
+end keywords
+
+keywords in Keyword are
+  getmetatable, setmetatable, ipairs, pairs, next, rawget,
+  rawset, require, select, tonumber, tostring, type, print,
+  pcall, error, assert, table, math, io, os, string,
+  Num, Sym, Col, Tab, Nbi, Rmi, Tree, Forest, Nb, Rmeans,
+  Hist, Drawn, ThisC, ThatC
+end keywords
+
+# Only the metatables get the loud face: there are seven, and
+# each one is a type.  Everything else is quiet.  Label and
+# Label_strong both come out as yellow-on-white under --pro=color,
+# so the constructors (Num, Tab, ... called on nearly every line)
+# sit with the stdlib instead: marking every call the same as a
+# definition is not navigation, it is a highlighter emptied over
+# the page.
+keywords in Label_strong are
+  NUM, SYM, TAB, NBI, RMI, TREE, FOREST, NB, RMEANS
+end keywords
+
+sequences are
+  "--" Comment,
+  "[[" String "]]",
+  C-string
+end sequences
+
+# yue has no `function` and no `end`: a definition is
+# `name = (args) ->` with the name at column 0, and -> is the
+# only thing that opens a body.  So the anchored name is the
+# label (a2ps regexes do honour ^) and the arrows are keywords.
+# Three column-0 lines are not definitions -- `local`, `if`,
+# `setmetatable` -- and they take the label face too.  That is
+# the price of labelling the other forty.
+operators are
+  /^[A-Za-z_][A-Za-z0-9_]*/ Label_strong,
+  /=>/ Keyword_strong,
+  /->/ Keyword_strong,
+  /\\[A-Za-z_][A-Za-z0-9_]*/ Keyword,
+  /@[A-Za-z_][A-Za-z0-9_]*/ Keyword,
+  /:[A-Za-z_][A-Za-z0-9_]*/ Keyword
+end operators
+
+end style
