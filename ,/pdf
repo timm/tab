@@ -2,7 +2,9 @@
 # pdf: x.lua ==> ~/tmp/x.pdf, pretty-printed, 3-up landscape.
 # usage: ,/pdf file.lua [file.py ...]
 #   Font=4.5   font size (flow mode default)
-#   Chars=65   wrap width
+#   Chars=65   wrap width.  a2ps DERIVES the font size from this, so
+#              Chars and Font fight and Chars wins: setting both is
+#              the same as setting Chars alone.  Pick one.
 #   Lines=118  column-aligned mode: a ^L at the END of a line jumps
 #              to the top of the next column of Lines rows; without
 #              Lines, ^Ls are stripped and the text just flows.
