@@ -30,6 +30,8 @@ flags:
   fmt=%.2f         how a fraction is printed
   cuts=50          bins per numeric column (rounded up to odd)
   depth=12         how deep a tree may grow
+  few=128          rows one `acquire` pass may look at
+  first=4          rows `acquire` labels blind, before it has a model
   leaf=2           rows each side of a cut needs
   m=2              m-estimate: prior weight for a thin bin
   p=2              minkowski coefficient
@@ -55,7 +57,7 @@ values = (s) ->                   -- row; values from comma-separated `s`
   u = {}
   for s1 in (s .. ",")\gmatch("(.-),")
     v = s1\match("^%s*(.-)%s*$")
-    u[#u + 1] = tonumber(v) or v
+    u[] = tonumber(v) or v
   u
 
 csv = (file) ->                   -- rows; `rows` in a `file:str`
@@ -64,15 +66,15 @@ csv = (file) ->                   -- rows; `rows` in a `file:str`
   for line in io.lines(path)
     s = line\match("^%s*(.-)%s*$")
     if s != "" and s\sub(1, 1) != "#"
-      rows[#rows + 1] = values(s)
+      rows[] = values(s)
   rows
 
 -- ---- columns --------------------------------------------------------
 Col = (txt, at) ->                -- SYM | NUM; a-z Sym; A-Z Num
   (txt\find("^%u") and Num or Sym)(txt, at)
 
-Sym = (txt, at) ->                -- SYM; counts of symbols in column `at`
-  new SYM, {txt: txt or "S", at: at or 0, n: 0, has: {}, cl: 0}
+Sym = (txt="S", at=0) ->          -- SYM; counts of symbols in column `at`
+  new SYM, {txt: txt, at: at, n: 0, has: {}, cl: 0}
 
 -- `@cl` is sum(c*log c) over the counts, kept up to date here so
 -- `div` need not walk `@has` at all.  Two reasons.  Order: `pairs`
@@ -82,9 +84,8 @@ Sym = (txt, at) ->                -- SYM; counts of symbols in column `at`
 -- (measured) the same seed then grew a different forest run to run.
 -- Cost: a cut sweep calls `add` twice and `div` twice per candidate,
 -- so paying two logs here beats paying one per klass there.
-SYM.add = (v, inc): v =>          -- value; `inc` more of `v` (-1 = less)
+SYM.add = (v, inc=1): v =>        -- value; `inc` more of `v` (-1 = less)
   unless v == "?"
-    inc or= 1
     @n += inc
     c = @has[v] or 0
     @cl -= c * log(c) if c > 0
@@ -106,7 +107,7 @@ SYM.div = =>                      -- num; entropy, in bits
 SYM.mid = =>                      -- value; the mode
   ks = {}
   for v in pairs @has
-    ks[#ks + 1] = v
+    ks[] = v
   sort ks, (x, y) -> tostring(x) < tostring(y)
   local bk                        -- `local`: assigned inside the loop
   b = -1
@@ -122,14 +123,13 @@ SYM.nVals = =>                    -- int; values `@` has seen, at least 2
   @kinds = @kinds or max(2, sum(@has, -> 1))
   @kinds
 
-Num = (txt, at) ->                -- NUM; Welford summary of column `at`
-  new NUM, {txt: txt or "N", at: at or 0, n: 0, mu: 0, m2: 0,
-            w: ((txt or "")\find("%-$") and 0 or 1)}
+Num = (txt="N", at=0) ->          -- NUM; Welford summary of column `at`
+  new NUM, {txt: txt, at: at, n: 0, mu: 0, m2: 0,
+            w: (txt\find("%-$") and 0 or 1)}
 
-NUM.add = (v, inc): v =>          -- value; `inc` more of `v` (-1 takes it
+NUM.add = (v, inc=1): v =>        -- value; `inc` more of `v` (-1 takes it
   unless v == "?"                 -- back out, so one scan can shift rows
-    inc or= 1                     -- across a cut)
-    @n += inc
+    @n += inc                     -- across a cut)
     if @n <= 0
       @n, @mu, @m2 = 0, 0, 0
     else
@@ -160,27 +160,37 @@ Tab = (src) ->                    -- TAB from `src`: a file name, or rows
 
 TAB.add = (row): row =>           -- row; the first `row` is the names
   return @head(row) if #@cols == 0
-  @rows[#@rows + 1] = row
+  @rows[] = row
   for _, col in order @cols
     col\add row[col.at]
+
+-- `add`'s inverse on the SUMMARIES only -- `@rows` is the caller's to
+-- manage.  Two jobs, two methods: `acquire` pops the row it is
+-- demoting off a sorted list (which is where it knows the row is) and
+-- then asks the columns to forget it.  Rolled into `add` instead,
+-- this needed an `inc` and a `keep` that had to agree, on the one
+-- call in the file that used either.
+TAB.sub = (row): row =>           -- row; take `row` out of `@cols`
+  for _, col in order @cols
+    col\add row[col.at], -1
 
 TAB.head = (names): nil =>        -- read `names:row` as `@`'s columns:
   @names = names                  -- X skip, -+! goals, ! the klass,
   for at, txt in order names      -- - minimize
     col = Col(txt, at)
-    @cols[#@cols + 1] = col
+    @cols[] = col
     unless txt\find("X$")
       if txt\find("[-+!]$")
-        @y[#@y + 1] = col
+        @y[] = col
         @klass = col if txt\find("!$")
       else
-        @x[#@x + 1] = col
+        @x[] = col
 
-TAB.clone = (rows, how) =>        -- TAB; `rows` in a fresh TAB
+TAB.clone = (rows={}, how) =>     -- TAB; `rows` in a fresh TAB
   head = how and map(@cols, (col) -> col.txt\lower!) or @names
   out = {head}                    -- `how`="bin" discretizes, so sym
-  for _, row in order (rows or {})
-    out[#out + 1] = if how
+  for _, row in order rows
+    out[] = if how
       map @cols, (col) -> col[how](col, row[col.at])
     else
       row
@@ -192,9 +202,40 @@ TAB.mid = (cols) =>               -- dict; {name: middle}, for logfmt
     u[col.txt] = col\mid!
   u
 
+-- An unknown goal reads as that column's middle -- the same call
+-- `goal` in tab-eg already makes for a missing regression target.
+-- Without it `norm` hands "?" straight back and the subtraction
+-- below dies: three moot/regression sets carry a "?" in y, and no
+-- arm reached this line until `acquire`, which ranks on ydist even
+-- when the corpus is one-goal.
 TAB.ydist = (row) =>              -- num; `row`'s distance to heaven
-  on = (col) -> abs(col\norm(row[col.at]) - col.w) ^ the.p
+  on = (col) ->
+    v = row[col.at]
+    v = col\mid! if v == "?"
+    abs(col\norm(v) - col.w) ^ the.p
   (sum(@y, on) / #@y) ^ (1 / the.p)
+
+-- Minkowski over the x columns, each normalised to 0..1 first.  An
+-- unknown is pushed to whichever end is further from what it is being
+-- compared against, so saying nothing never reads as agreement.
+TAB.xdist = (r1, r2) =>           -- num; how far apart two rows are, on x
+  on = (col) ->
+    a, b = r1[col.at], r2[col.at]
+    return 1 if a == "?" and b == "?"
+    return (a == b and 0 or 1) if col.it == SYM
+    a, b = col\norm(a), col\norm(b)
+    a = (b > .5 and 0 or 1) if a == "?"
+    b = (a > .5 and 0 or 1) if b == "?"
+    abs(a - b) ^ the.p
+  (sum(@x, on) / #@x) ^ (1 / the.p)
+
+-- `mid` keys on `col.txt` because its reader is `logfmt`.  `xdist`
+-- reads a row, so it needs one keyed on `col.at` instead.
+TAB.mids = =>                     -- row; every column's middle, by `at`
+  u = {}
+  for _, col in order @cols
+    u[col.at] = col\mid!
+  u
 
 TAB.split = =>                    -- rows,rows; 80:20, off a copy:
   rows = shuffle map(@rows, same) -- never @rows itself
@@ -203,7 +244,7 @@ TAB.split = =>                    -- rows,rows; 80:20, off a copy:
   t = u1
   for j, row in order rows
     t = u2 if j > n
-    t[#t + 1] = row
+    t[] = row
   u1, u2
 
 -- Offer `out` every cut of every x column over `rows`: `ks` is one
@@ -270,7 +311,7 @@ SYM.index = (    vs,v,n) =>
   unless @vi
     vs = {}
     for v in pairs @has
-      vs[#vs + 1] = v
+      vs[] = v
     sort vs, (a, b) -> tostring(a) < tostring(b)
     @vi, @vs = {}, vs
     for n = 1, #vs
@@ -492,7 +533,7 @@ NB.like = (sub, row, cols = sub.x) =>   -- num; log P(`row` | `sub:TAB`)
 NB.klasses = =>                   -- list; `@subs`'s keys, sorted
   ks = {}
   for k in pairs @subs
-    ks[#ks + 1] = k
+    ks[] = k
   sort ks, (a, b) -> tostring(a) < tostring(b)
 
 NB.guess = (row) =>               -- value; `row`'s likeliest klass
@@ -529,10 +570,9 @@ NB.posts = (row) =>               -- dict; p(klass | `row`)
 -- tree so every node redraws its own few.
 -- `tab` grows trees over a KLASS only; regression is `Rmeans`' job,
 -- and a tree whose target is a distance has no entropy to count.
-Tree = (tbl, rows, lvl, cols) ->
-  rows or= tbl.rows
-  node = new TREE, {tbl: tbl, rows: rows, lvl: lvl or 1,
-                    cols: cols or 0, n: #rows, txt: ""}
+Tree = (tbl, rows=tbl.rows, lvl=1, cols=0) ->
+  node = new TREE, {tbl: tbl, rows: rows, lvl: lvl,
+                    cols: cols, n: #rows, txt: ""}
   node\sum!\grow!
 
 -- What this node answers with: `@all` (its rows' klasses, summarized)
@@ -554,7 +594,7 @@ TREE.grow = =>
     a, b = {}, {}
     for _, row in order @rows
       t = cut.col\holds(row[cut.col.at], cut.v) and a or b
-      t[#t + 1] = row
+      t[] = row
     if #a >= the.leaf and #b >= the.leaf     -- else, a bad cut
       @at = cut
       @left = Tree(@tbl, a, @lvl + 1, @cols)
@@ -594,15 +634,15 @@ TREE.walk = =>                    -- fun; iterator over `@` and all below
     n = table.remove todo
     return unless n
     if n.at
-      todo[#todo + 1] = n.right
-      todo[#todo + 1] = n.left
+      todo[] = n.right
+      todo[] = n.left
     n
 
 TREE.show = (): nil =>            -- print `@`, one line per node
   cell = (col) -> col.it == NUM and o(col.mu) or best(col.has, same)
   t, ends = {}, {}
   for n in @walk!
-    t[#t + 1] = n unless n.at
+    t[] = n unless n.at
   sort t, "mid"
   ends[t[#t]] = " \226\156\151 "  -- cross the worst leaf,
   ends[t[1]] = " \226\156\147 "   -- tick the best one
@@ -642,11 +682,10 @@ TREE.posts = (row) =>             -- dict; p(klass | `row`) off the leaf
 -- splitting on sqrt(#x) columns it draws itself.  Breiman's random
 -- forest, so: rows sampled once per tree, attributes resampled at
 -- every split.
-Forest = (tbl, rows, rounds) ->
-  rows or= tbl.rows
+Forest = (tbl, rows=tbl.rows, rounds=the.rounds) ->
   c = max(1, floor(sqrt(#tbl.x)))
   i = new FOREST, {all: {}, tbl: tbl}
-  for k = 1, rounds or the.rounds
+  for k = 1, rounds
     i.all[k] = Tree(tbl, some(rows, #rows), 1, c)
   i
 
@@ -660,7 +699,7 @@ FOREST.votes = (row) =>           -- dict,list; tally, in order
   for _, m in order @all
     k = m\pick(row).mid
     if k != nil
-      ks[#ks + 1] = k if t[k] == nil
+      ks[] = k if t[k] == nil
       t[k] = (t[k] or 0) + 1
   t, ks
 
@@ -679,6 +718,55 @@ FOREST.guess = (row) =>           -- value; the most voted
   for _, k in order ks do
     b, bk = t[k], k if t[k] > b   -- strict: first wins
   bk
+
+-- ---- acquire --------------------------------------------------------
+-- Spend the label budget on rows worth labelling.  `the.first` rows
+-- are labelled blind; the best few of those become `best` and the
+-- others `rest`.  After that every pick is the unlabelled row that
+-- sits furthest from `rest`'s middle and nearest `best`'s.  `rmeans`
+-- spends the same budget on whatever a shuffle hands it first, so the
+-- two arms differ in WHERE the labels went, not how many there were.
+-- `y` scores a row, lower being better; it defaults to distance to
+-- heaven.  A caller that is scored on something else must say so, or
+-- `acquire` hunts one end of the data while its judge rewards the
+-- other: every moot/regression target ends in `!`, so `w`=1 and
+-- ydist calls the LARGEST y best, while `tab-eg`'s `top` calls the
+-- smallest best.  Pointed the wrong way, the arm scores 5 of 59.
+acquire = (tab, cap=the.budget - the.check, y=((r) -> tab\ydist r)) ->
+  pool = shuffle map(tab.rows, same)   -- a copy, never `tab.rows`
+  todo = {}
+  for j = 1, min(the.few, #pool)
+    todo[] = pool[j]
+  both = tab\clone!
+  for _ = 1, min(the.first, #todo)
+    both\add table.remove(todo)
+  sortBy both.rows, y
+  k = floor the.first ^ .5
+  best, rest = tab\clone!, tab\clone!
+  for j, row in order both.rows
+    if j <= k then best\add row else rest\add row
+  while #todo > 0 and #both.rows < cap
+    bmid, rmid = best\mids!, rest\mids!
+    -- ASCENDING, so the best bet is the LAST item and the next pick
+    -- is a `table.remove` off the end.  `rank` below reverses this.
+    sortBy todo, (z) -> tab\xdist(z, rmid) - tab\xdist(z, bmid)
+    best\add both\add table.remove(todo)
+    sortBy best.rows, y
+    -- `best` holds the top sqrt(n) by ydist.  It was just sorted
+    -- ascending, so the LAST row is the worst one in it: pop that
+    -- (O(1) at the end; reverse-sorting would make it an O(n) shift),
+    -- tell `best`'s columns to forget it, and hand it to `rest`.
+    if #best.rows > (#both.rows) ^ .5
+      rest\add best\sub table.remove(best.rows)
+  both.rows, best, rest
+
+-- Order rows the model has not been shown -- a hold-out -- by what
+-- `acquire` learnt: near `best`'s middle, far from `rest`'s.  BETTER
+-- FIRST, so `rows[1]` is what to label next.  That is the negation of
+-- the key `acquire` sorts `todo` on, which wants its pick at the end.
+TAB.rank = (rows, best, rest) =>  -- list; `rows`, the good ones first
+  bmid, rmid = best\mids!, rest\mids!
+  sortBy rows, (z) -> @xdist(z, bmid) - @xdist(z, rmid)
 
 -- ---- misc -----------------------------------------------------------
 new = (meta, i) ->                -- connect instance `i` to class `meta`
@@ -699,8 +787,8 @@ cli = ->                          -- dict; update `the` from the command
 -- Restart the generator at `n`, or back at `the.seed`.  The setting
 -- and the state are two things: `the.seed` says where a run began,
 -- `rng` is where it has got to, so a header can still name the seed.
-seed = (n): nil ->
-  rng = n or the.seed
+seed = (n=the.seed): nil ->
+  rng = n
 
 rint = (n) ->                     -- int in 1..`n`, repeatable from seed
   rng = (16807 * (rng or the.seed)) % 2147483647
@@ -742,7 +830,7 @@ pick = (t, n) ->
 map = (t, on) ->                  -- list; `on(v,k)` over `t`, nils dropped
   u = {}
   for k, v in ipairs t
-    u[#u + 1] = on(v, k)
+    u[] = on(v, k)
   u
 
 sum = (t, on) ->                  -- num; `on(v,k)` over every item, added
@@ -751,10 +839,8 @@ sum = (t, on) ->                  -- num; `on(v,k)` over every item, added
     n += on(v, k)
   n
 
-adds = (src, it, on) ->           -- it; `on(x)` for x in `src`, added to
-  it or= Num!                     -- `it` (a fresh Num, by default)
-  on or= same
-  for _, x in order src
+adds = (src, it=Num!, on=same) -> -- it; `on(x)` for x in `src`, added to
+  for _, x in order src           -- `it` (a fresh Num, by default)
     it\add on(x)
   it
 
@@ -775,6 +861,17 @@ sort = (t, on) ->                 -- list; `t` sorted in place, ascending
   table.sort t, on
   t
 
+-- `sort`, on a key, with ties left where they arrived.  `table.sort`
+-- is not stable, so two rows a key cannot separate would swap on a
+-- whim -- and `acquire` reads the end of the list, so a whim there
+-- picks a different row to label and the run stops reproducing.
+sortBy = (u, on) ->               -- list; `u` sorted in place by `on(v)`
+  key, was = {}, {}
+  for at, v in ipairs u
+    key[v], was[v] = on(v), at
+  sort u, (a, b) ->
+    key[a] == key[b] and was[a] < was[b] or key[a] < key[b]
+
 order = (t, on) ->                -- fun; `ipairs(t)` (or of a sorted
   t = csv(t) if type(t) == "string"   -- copy, given `on`); a string `t`
   return ipairs(t) unless on          -- means rows of a csv
@@ -787,11 +884,11 @@ o = (x) ->                        -- str; `x` as text, fractions through
   u = {}
   if #x > 0
     for _, v in ipairs x
-      u[#u + 1] = o(v)
+      u[] = o(v)
   else
     for k, v in pairs x
       if k != "it" and type(v) != "function"
-        u[#u + 1] = o(k) .. "=" .. o(v)
+        u[] = o(k) .. "=" .. o(v)
   "{" .. table.concat((#x > 0 and u or sort(u, lt)), " ") .. "}"
 
 print = (...): nil ->             -- print the lot, tab separated, via `o`
@@ -805,19 +902,19 @@ fmt = (s, ...) -> s\format ...
 -- Return `d:dict` as "k=v k=v" lines, keys sorted.  Atoms pack onto
 -- one line; a table value gets its key, then its own lines, indented
 -- one more stop.  So a nested dict prints as deep as it really is.
-logfmt = (d, indent) ->           -- str
-  pad = ("  ")\rep(indent or 0)
+logfmt = (d, indent=0) ->         -- str
+  pad = ("  ")\rep indent
   u, flat, out = {}, {}, {}
   for k in pairs d
-    u[#u + 1] = k
+    u[] = k
   sort u
   for _, k in order u
-    flat[#flat + 1] = k .. "=" .. o(d[k]) if type(d[k]) != "table"
+    flat[] = k .. "=" .. o(d[k]) if type(d[k]) != "table"
   out[1] = pad .. table.concat(flat, " ") if #flat > 0
   for _, k in order u
     if type(d[k]) == "table"
-      out[#out + 1] = pad .. k
-      out[#out + 1] = logfmt(d[k], (indent or 0) + 1)
+      out[] = pad .. k
+      out[] = logfmt(d[k], indent + 1)
   table.concat out, "\n"
 
 -- Say what this run was: when it ran, which version ran it, what it
@@ -857,7 +954,7 @@ eg["--all"] = (): nil ->
   keys = {}
   for k in pairs eg
     unless (" -h --all ")\find(" " .. k .. " ", 1, true)
-      keys[#keys + 1] = k
+      keys[] = k
   for _, k in order(keys, lt)
     t0 = os.clock!
     run k
@@ -920,6 +1017,21 @@ eg["--mid"] = (): nil ->
   t = Tab the.train
   print logfmt(t\mid(t.y))
   ok t\mid(t.y)["Acc+"], 15.5680904523
+
+eg["--acq"] = (): nil ->          -- where a budget of labels landed
+  tab = Tab the.train
+  mu  = (rows) ->                 -- best, and mean, ydist of `rows`
+    u = sort map(rows, (r) -> tab\ydist r), lt
+    u[1], sum(u, same) / #u
+  tr, te = tab\split!             -- acquire on the 80, rank the 20 it
+  got, best, rest = acquire tab\clone tr        -- has never been shown
+  held = tab\rank map(te, same), best, rest
+  top = {}
+  for j = 1, min(the.check, #held)
+    top[] = held[j]
+  print logfmt {n: #got, acqBest: (mu got), acqMu: select(2, mu got),
+                top5: (mu top), heldBest: (mu te), heldMu: select(2, mu te)}
+  ok (mu top), 0.1569024159
 
 eg["--ydist"] = (): nil ->
   t = Tab the.train
@@ -1027,7 +1139,8 @@ setmetatable {
     :TAB, :NUM, :SYM, :RMEANS, :NB, :TREE, :FOREST
     :values, :csv, :Col, :Sym, :Num, :Tab, :Rmeans, :Nb, :Tree, :Forest
     :new, :cli, :seed, :rint, :shuffle, :some, :pick
-    :map, :sum, :adds, :best, :same, :lt, :sort, :order
+    :map, :sum, :adds, :best, :same, :lt, :sort, :sortBy, :order
+    :acquire
     :o, :print, :fmt, :logfmt, :about
     :near, :ok, :run, :halves
   }, {__index: _G}

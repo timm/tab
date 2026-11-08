@@ -12,7 +12,7 @@
 -- it will overwrite the module's `near` test helper.  Marked below.
 
 local rng
-local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, ThisC, ThatC, Hist, clog, ent, sc, binRows, tally, hist, Rmeans, Nb, Tree, Forest, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
+local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, ThisC, ThatC, Hist, clog, ent, sc, binRows, tally, hist, Rmeans, Nb, Tree, Forest, acquire, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, sortBy, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
 
 the = { }
 help = [[tab: a good guess from a few dozen labels.
@@ -29,6 +29,8 @@ flags:
   fmt=%.2f         how a fraction is printed
   cuts=50          bins per numeric column (rounded up to odd)
   depth=12         how deep a tree may grow
+  few=128          rows one `acquire` pass may look at
+  first=4          rows `acquire` labels blind, before it has a model
   leaf=2           rows each side of a cut needs
   m=2              m-estimate: prior weight for a thin bin
   p=2              minkowski coefficient
@@ -77,9 +79,15 @@ Col = function(txt, at)
 end
 
 Sym = function(txt, at)
+  if txt == nil then
+    txt = "S"
+  end
+  if at == nil then
+    at = 0
+  end
   return new(SYM, {
-    txt = txt or "S",
-    at = at or 0,
+    txt = txt,
+    at = at,
     n = 0,
     has = { },
     cl = 0
@@ -95,8 +103,10 @@ end
 -- Cost: a cut sweep calls `add` twice and `div` twice per candidate,
 -- so paying two logs here beats paying one per klass there.
 SYM.add = function(self, v, inc)
+  if inc == nil then
+    inc = 1
+  end
   if not (v == "?") then
-    inc = inc or 1
     self.n = self.n + inc
     local c = self.has[v] or 0
     if c > 0 then
@@ -158,19 +168,27 @@ SYM.nVals = function(self)
 end
 
 Num = function(txt, at)
+  if txt == nil then
+    txt = "N"
+  end
+  if at == nil then
+    at = 0
+  end
   return new(NUM, {
-    txt = txt or "N",
-    at = at or 0,
+    txt = txt,
+    at = at,
     n = 0,
     mu = 0,
     m2 = 0,
-    w = ((txt or ""):find("%-$") and 0 or 1)
+    w = (txt:find("%-$") and 0 or 1)
   })
 end
 
 NUM.add = function(self, v, inc)
+  if inc == nil then
+    inc = 1
+  end
   if not (v == "?") then
-    inc = inc or 1
     self.n = self.n + inc
     if self.n <= 0 then
       self.n, self.mu, self.m2 = 0, 0, 0
@@ -227,9 +245,25 @@ TAB.add = function(self, row)
   if #self.cols == 0 then
     return self:head(row)
   end
-  self.rows[#self.rows + 1] = row
+  do
+    local _obj_0 = self.rows
+    _obj_0[#_obj_0 + 1] = row
+  end
   for _, col in order(self.cols) do
     col:add(row[col.at])
+  end
+  return row
+end
+
+-- `add`'s inverse on the SUMMARIES only -- `@rows` is the caller's to
+-- manage.  Two jobs, two methods: `acquire` pops the row it is
+-- demoting off a sorted list (which is where it knows the row is) and
+-- then asks the columns to forget it.  Rolled into `add` instead,
+-- this needed an `inc` and a `keep` that had to agree, on the one
+-- call in the file that used either.
+TAB.sub = function(self, row)
+  for _, col in order(self.cols) do
+    col:add(row[col.at], -1)
   end
   return row
 end
@@ -238,15 +272,22 @@ TAB.head = function(self, names)
   self.names = names
   for at, txt in order(names) do
     local col = Col(txt, at)
-    self.cols[#self.cols + 1] = col
+    do
+      local _obj_0 = self.cols
+      _obj_0[#_obj_0 + 1] = col
+    end
     if not txt:find("X$") then
       if txt:find("[-+!]$") then
-        self.y[#self.y + 1] = col
+        do
+          local _obj_0 = self.y
+          _obj_0[#_obj_0 + 1] = col
+        end
         if txt:find("!$") then
           self.klass = col
         end
       else
-        self.x[#self.x + 1] = col
+        local _obj_0 = self.x
+        _obj_0[#_obj_0 + 1] = col
       end
     end
   end
@@ -254,13 +295,16 @@ TAB.head = function(self, names)
 end
 
 TAB.clone = function(self, rows, how)
+  if rows == nil then
+    rows = { }
+  end
   local head = how and map(self.cols, function(col)
     return col.txt:lower()
   end) or self.names
   local out = {
     head
   }
-  for _, row in order((rows or { })) do
+  for _, row in order(rows) do
     if how then
       out[#out + 1] = map(self.cols, function(col)
         return col[how](col, row[col.at])
@@ -280,12 +324,57 @@ TAB.mid = function(self, cols)
   return u
 end
 
+-- An unknown goal reads as that column's middle -- the same call
+-- `goal` in tab-eg already makes for a missing regression target.
+-- Without it `norm` hands "?" straight back and the subtraction
+-- below dies: three moot/regression sets carry a "?" in y, and no
+-- arm reached this line until `acquire`, which ranks on ydist even
+-- when the corpus is one-goal.
 TAB.ydist = function(self, row)
   local on
   on = function(col)
-    return abs(col:norm(row[col.at]) - col.w) ^ the.p
+    local v = row[col.at]
+    if v == "?" then
+      v = col:mid()
+    end
+    return abs(col:norm(v) - col.w) ^ the.p
   end
   return (sum(self.y, on) / #self.y) ^ (1 / the.p)
+end
+
+-- Minkowski over the x columns, each normalised to 0..1 first.  An
+-- unknown is pushed to whichever end is further from what it is being
+-- compared against, so saying nothing never reads as agreement.
+TAB.xdist = function(self, r1, r2)
+  local on
+  on = function(col)
+    local a, b = r1[col.at], r2[col.at]
+    if a == "?" and b == "?" then
+      return 1
+    end
+    if col.it == SYM then
+      return (a == b and 0 or 1)
+    end
+    a, b = col:norm(a), col:norm(b)
+    if a == "?" then
+      a = (b > .5 and 0 or 1)
+    end
+    if b == "?" then
+      b = (a > .5 and 0 or 1)
+    end
+    return abs(a - b) ^ the.p
+  end
+  return (sum(self.x, on) / #self.x) ^ (1 / the.p)
+end
+
+-- `mid` keys on `col.txt` because its reader is `logfmt`.  `xdist`
+-- reads a row, so it needs one keyed on `col.at` instead.
+TAB.mids = function(self)
+  local u = { }
+  for _, col in order(self.cols) do
+    u[col.at] = col:mid()
+  end
+  return u
 end
 
 TAB.split = function(self)
@@ -749,12 +838,20 @@ end
 -- `tab` grows trees over a KLASS only; regression is `Rmeans`' job,
 -- and a tree whose target is a distance has no entropy to count.
 Tree = function(tbl, rows, lvl, cols)
-  rows = rows or tbl.rows
+  if rows == nil then
+    rows = tbl.rows
+  end
+  if lvl == nil then
+    lvl = 1
+  end
+  if cols == nil then
+    cols = 0
+  end
   local node = new(TREE, {
     tbl = tbl,
     rows = rows,
-    lvl = lvl or 1,
-    cols = cols or 0,
+    lvl = lvl,
+    cols = cols,
     n = #rows,
     txt = ""
   })
@@ -914,13 +1011,18 @@ end
 -- forest, so: rows sampled once per tree, attributes resampled at
 -- every split.
 Forest = function(tbl, rows, rounds)
-  rows = rows or tbl.rows
+  if rows == nil then
+    rows = tbl.rows
+  end
+  if rounds == nil then
+    rounds = the.rounds
+  end
   local c = max(1, floor(sqrt(#tbl.x)))
   local i = new(FOREST, {
     all = { },
     tbl = tbl
   })
-  for k = 1, rounds or the.rounds do
+  for k = 1, rounds do
     i.all[k] = Tree(tbl, some(rows, #rows), 1, c)
   end
   return i
@@ -972,6 +1074,79 @@ FOREST.guess = function(self, row)
   return bk
 end
 
+-- ---- acquire --------------------------------------------------------
+-- Spend the label budget on rows worth labelling.  `the.first` rows
+-- are labelled blind; the best few of those become `best` and the
+-- others `rest`.  After that every pick is the unlabelled row that
+-- sits furthest from `rest`'s middle and nearest `best`'s.  `rmeans`
+-- spends the same budget on whatever a shuffle hands it first, so the
+-- two arms differ in WHERE the labels went, not how many there were.
+-- `y` scores a row, lower being better; it defaults to distance to
+-- heaven.  A caller that is scored on something else must say so, or
+-- `acquire` hunts one end of the data while its judge rewards the
+-- other: every moot/regression target ends in `!`, so `w`=1 and
+-- ydist calls the LARGEST y best, while `tab-eg`'s `top` calls the
+-- smallest best.  Pointed the wrong way, the arm scores 5 of 59.
+acquire = function(tab, cap, y)
+  if cap == nil then
+    cap = the.budget - the.check
+  end
+  if y == nil then
+    y = (function(r)
+      return tab:ydist(r)
+    end)
+  end
+  local pool = shuffle(map(tab.rows, same))
+  local todo = { }
+  for j = 1, min(the.few, #pool) do
+    todo[#todo + 1] = pool[j]
+  end
+  local both = tab:clone()
+  for _ = 1, min(the.first, #todo) do
+    both:add(table.remove(todo))
+  end
+  sortBy(both.rows, y)
+  local k = floor(the.first ^ .5)
+  local rest
+  best, rest = tab:clone(), tab:clone()
+  for j, row in order(both.rows) do
+    if j <= k then
+      best:add(row)
+    else
+      rest:add(row)
+    end
+  end
+  while #todo > 0 and #both.rows < cap do
+    local bmid, rmid = best:mids(), rest:mids()
+    -- ASCENDING, so the best bet is the LAST item and the next pick
+    -- is a `table.remove` off the end.  `rank` below reverses this.
+    sortBy(todo, function(z)
+      return tab:xdist(z, rmid) - tab:xdist(z, bmid)
+    end)
+    best:add(both:add(table.remove(todo)))
+    sortBy(best.rows, y)
+    -- `best` holds the top sqrt(n) by ydist.  It was just sorted
+    -- ascending, so the LAST row is the worst one in it: pop that
+    -- (O(1) at the end; reverse-sorting would make it an O(n) shift),
+    -- tell `best`'s columns to forget it, and hand it to `rest`.
+    if #best.rows > (#both.rows) ^ .5 then
+      rest:add(best:sub(table.remove(best.rows)))
+    end
+  end
+  return both.rows, best, rest
+end
+
+-- Order rows the model has not been shown -- a hold-out -- by what
+-- `acquire` learnt: near `best`'s middle, far from `rest`'s.  BETTER
+-- FIRST, so `rows[1]` is what to label next.  That is the negation of
+-- the key `acquire` sorts `todo` on, which wants its pick at the end.
+TAB.rank = function(self, rows, best, rest)
+  local bmid, rmid = best:mids(), rest:mids()
+  return sortBy(rows, function(z)
+    return self:xdist(z, bmid) - self:xdist(z, rmid)
+  end)
+end
+
 -- ---- misc -----------------------------------------------------------
 new = function(meta, i)
   meta.__index, meta.it, meta.__tostring = meta, meta, o
@@ -996,7 +1171,10 @@ end
 -- and the state are two things: `the.seed` says where a run began,
 -- `rng` is where it has got to, so a header can still name the seed.
 seed = function(n)
-  rng = n or the.seed
+  if n == nil then
+    n = the.seed
+  end
+  rng = n
   return nil
 end
 
@@ -1065,8 +1243,12 @@ sum = function(t, on)
 end
 
 adds = function(src, it, on)
-  it = it or Num()
-  on = on or same
+  if it == nil then
+    it = Num()
+  end
+  if on == nil then
+    on = same
+  end
   for _, x in order(src) do
     it:add(on(x))
   end
@@ -1100,6 +1282,20 @@ sort = function(t, on)
   end
   table.sort(t, on)
   return t
+end
+
+-- `sort`, on a key, with ties left where they arrived.  `table.sort`
+-- is not stable, so two rows a key cannot separate would swap on a
+-- whim -- and `acquire` reads the end of the list, so a whim there
+-- picks a different row to label and the run stops reproducing.
+sortBy = function(u, on)
+  local key, was = { }, { }
+  for at, v in ipairs(u) do
+    key[v], was[v] = on(v), at
+  end
+  return sort(u, function(a, b)
+    return key[a] == key[b] and was[a] < was[b] or key[a] < key[b]
+  end)
 end
 
 order = function(t, on)
@@ -1151,7 +1347,10 @@ end
 -- one line; a table value gets its key, then its own lines, indented
 -- one more stop.  So a nested dict prints as deep as it really is.
 logfmt = function(d, indent)
-  local pad = ("  "):rep(indent or 0)
+  if indent == nil then
+    indent = 0
+  end
+  local pad = ("  "):rep(indent)
   local u, flat, out = { }, { }, { }
   for k in pairs(d) do
     u[#u + 1] = k
@@ -1168,7 +1367,7 @@ logfmt = function(d, indent)
   for _, k in order(u) do
     if type(d[k]) == "table" then
       out[#out + 1] = pad .. k
-      out[#out + 1] = logfmt(d[k], (indent or 0) + 1)
+      out[#out + 1] = logfmt(d[k], indent + 1)
     end
   end
   return table.concat(out, "\n")
@@ -1342,6 +1541,35 @@ eg["--mid"] = function()
   local t = Tab(the.train)
   print(logfmt(t:mid(t.y)))
   ok(t:mid(t.y)["Acc+"], 15.5680904523)
+  return nil
+end
+
+eg["--acq"] = function()
+  local tab = Tab(the.train)
+  local mu
+  mu = function(rows)
+    local u = sort(map(rows, function(r)
+      return tab:ydist(r)
+    end), lt)
+    return u[1], sum(u, same) / #u
+  end
+  local tr, te = tab:split()
+  local got, rest
+  got, best, rest = acquire(tab:clone(tr))
+  local held = tab:rank(map(te, same), best, rest)
+  local top = { }
+  for j = 1, min(the.check, #held) do
+    top[#top + 1] = held[j]
+  end
+  print(logfmt({
+    n = #got,
+    acqBest = (mu(got)),
+    acqMu = select(2, mu(got)),
+    top5 = (mu(top)),
+    heldBest = (mu(te)),
+    heldMu = select(2, mu(te))
+  }))
+  ok((mu(top)), 0.1569024159)
   return nil
 end
 
@@ -1615,7 +1843,9 @@ return setmetatable({
   same = same,
   lt = lt,
   sort = sort,
+  sortBy = sortBy,
   order = order,
+  acquire = acquire,
   o = o,
   print = print,
   fmt = fmt,

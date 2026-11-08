@@ -236,24 +236,158 @@ function rmeansall(tr,te,    y)     -- the rich arm: every train row
   y = goal(tr)
   return score(Rmeans(tr, tr.rows, y), te, y) end
 
+-- The same label budget as `rmeans`, spent on rows `acquire` chose
+-- rather than on the first 45 a shuffle handed over.  It has no y
+-- model, so there is no mae to report -- but `top` only ever asks
+-- `guess` for an ORDER, so acquire's own key stands in: a test row
+-- scores low when it sits near `best`'s middle and far from `rest`'s,
+-- and `top` labels the five lowest.  Lower is better, as it is for a
+-- predicted y, so `top` needs no change.  `acquire` is handed the
+-- same `y` `top` scores with: left on its ydist default it would
+-- chase the opposite end of every regression set (see tab.yue).
+function acq(tr,te,    y,best,rest,bmid,rmid,ys)
+  y = goal(tr)
+  _, best, rest = acquire(tr, the.budget - the.check, y)  -- `y`, not
+  bmid, rmid = best:mids(), rest:mids()
+  best, ys = top5y(
+    {guess = function(_,row) return tr:xdist(row,bmid)
+                                  - tr:xdist(row,rmid) end}, te, y)
+  return ("%.3f,%d"):format(pct(best, ys), gap(best, ys)) end
+
+-- ---- acquire, one model per klass ------------------------------------
+-- `acquire` in tab.yue ranks rows against ONE best/rest pair, which is
+-- what a single continuous goal wants.  A klass column has no such
+-- order, so here every klass runs its own one-vs-rest pair and the
+-- picks rotate between them.  One label serves every pair at once --
+-- a row of klass x is `best` for x and `rest` for all the others --
+-- so the seed costs labels in the number of klasses, not twice that.
+
+-- tab.yue:752 sorts all of `todo` on each pass and then uses one row
+-- of it.  Scan instead: one O(n) pass keeping the running best names
+-- the same row for less work, and drops the stable-sort machinery.
+function pick1(todo,on,    v,b,at) --> row; and take it out of `todo`
+  b = -math.huge
+  for j, z in order(todo) do
+    v = on(z)
+    if v > b then b, at = v, j end end
+  return table.remove(todo, at) end
+
+function klassesIn(got,at,    u,ks) --> list; klasses labelled so far
+  u, ks = {}, {}
+  for _, row in order(got) do u[row[at]] = true end
+  for x in pairs(u) do ks[#ks + 1] = x end
+  return sort(ks, function(a,b) return tostring(a) < tostring(b) end) end
+
+-- Rebuild klass `x`'s two middles from every label held so far.  An
+-- incremental best/rest cannot work here: a klass first seen on label
+-- 30 would have missed labels 1..29, and at <= 45 labels the rebuild
+-- costs nothing.
+function klassMids(tr,got,x,    b,r) --> bmid, rmid
+  b, r = tr:clone(), tr:clone()
+  for _, row in order(got) do
+    if row[tr.klass.at] == x then b:add(row) else r:add(row) end end
+  return b:mids(), r:mids() end
+
+-- Seed.  Reading a klass costs a label, so the only lawful way to go
+-- looking for a second klass is to keep labelling -- peeking at an
+-- unlabelled row's klass to pick a contrast would be cheating.  So
+-- take the next seed as far in x from everything already labelled as
+-- the pool allows: that IS the "not close" check (two rows sitting on
+-- top of each other leave `bmid - rmid` nothing to separate), and it
+-- is also the best odds of landing on a klass not yet seen.  Stop as
+-- soon as two distinct klasses are in hand.
+function seed1(tr,todo,got,cap,    far)
+  got[#got + 1] = table.remove(todo)
+  while #todo > 0 and #got < cap
+        and #klassesIn(got, tr.klass.at) < 2 do
+    got[#got + 1] = pick1(todo, function(z,    d)
+      d = math.huge
+      for _, row in order(got) do
+        far = tr:xdist(z, row)
+        if far < d then d = far end end
+      return d end) end end
+
+function acquired(tr,    cap,todo,got,ks,j,x,bm,rm) --> list; the labels
+  cap  = the.budget - the.check
+  todo = head1(shuffle(map(tr.rows, same)), the.few)
+  got  = {}
+  seed1(tr, todo, got, cap)
+  j = 0
+  while #todo > 0 and #got < cap do
+    ks = klassesIn(got, tr.klass.at)
+    if #ks < 2 then                 -- seed never found a second klass:
+      got[#got + 1] = table.remove(todo)   -- no pair to steer by, so
+    else                                   -- spend what is left blind
+      j = j % #ks + 1               -- rotate, so the labels stay even
+      x = ks[j]                     -- over the klasses found so far
+      bm, rm = klassMids(tr, got, x)
+      got[#got + 1] = pick1(todo, function(z)
+        return tr:xdist(z, rm) - tr:xdist(z, bm) end) end end
+  return got end
+
+-- Naive Bayes over an acquired budget, against the same over a random
+-- one: the pair isolates what the acquiring buys, since `nb` itself
+-- trains on every row.
+function nbrows(tr,te,rows,    trb,nb,col,bag)
+  trb, bag = tr:clone(rows, "bin"), Bag()
+  nb, col  = Nb(trb, trb.rows), trb.klass
+  for _, row in order(tr:clone(te.rows, "bin").rows) do
+    bag:tally(row[col.at], nb:guess(row)) end
+  return Acc:format(bag:score()) end
+
+function acqnb(tr,te) return nbrows(tr, te, acquired(tr)) end
+
+function rndnb(tr,te)
+  return nbrows(tr, te,
+                head1(shuffle(map(tr.rows, same)), the.budget - the.check)) end
+
 function head1(rows,n,    out)      -- rows' first n, or all of them
   out = {}
   for j = 1, (#rows < n and #rows or n) do out[j] = rows[j] end
   return out end
 
-function score(model,te,y)          -- where its top 5 sat, and its mae
-  return ("%.3f,%.6g"):format(top(model, te, y), mae(model, te, y)) end
-
-function top(model,te,y,    ys,rows,g,best) -- where its top 5 landed
+-- The y of the best row in `model`'s top `the.check` guesses, with
+-- every y in `te` sorted beside it.  One pass: `guess` runs over the
+-- test set once however many ways the caller then reads the answer.
+function top5y(model,te,y,    ys,rows,g,best) --> num, list
   ys, rows, g = {}, {}, {}
   for n, row in order(te.rows) do
     ys[n], rows[n], g[row] = y(row), row, model:guess(row) end
   for n, row in order(rows, function(a,b) return g[a] < g[b] end) do
     if n > the.check then break end
     best = (not best or y(row) < best) and y(row) or best end
+  return best, sort(ys, lt) end
+
+function pct(best,ys,    n,v)       -- `best`'s percentile within `ys`
   for n, v in order(ys, lt) do
     if v == best then return 100 * (n-1) / max(1, #ys-1) end end
   return 100 end
+
+-- 100 = we found the best row, 0 = we did no better than an average
+-- one, below 0 = worse than average.  `pct` counts HOW MANY rows beat
+-- us, which saturates: on a set where hundreds of rows sit a hair
+-- apart, being 200th is a fine answer scored as a bad one.  This
+-- counts how much y we gave up instead, which is the thing an
+-- optimizer actually spends, and it is unitless so sets compare.
+function gap(best,ys,    lo,mu,v)
+  lo, mu = ys[1], 0
+  for _, v in order(ys) do mu = mu + v end
+  mu = mu / #ys
+  if mu == lo then return 100 end   -- every row the same y: nothing lost
+  return math.floor(100 * (1 - (best - lo) / (mu - lo))) end
+
+function top(model,te,y,    best,ys)  -- where its top 5 landed
+  best, ys = top5y(model, te, y)
+  return pct(best, ys) end
+
+function win(model,te,y,    best,ys)  -- how much of the gap it closed
+  best, ys = top5y(model, te, y)
+  return gap(best, ys) end
+
+function score(model,te,y,    best,ys)  -- its top 5 two ways, and mae
+  best, ys = top5y(model, te, y)
+  return ("%.3f,%d,%.6g"):format(pct(best, ys), gap(best, ys),
+                                 mae(model, te, y)) end
 
 function mae(model,te,y,    num)    -- mean error of model's guesses
   num = Num()
@@ -319,14 +453,73 @@ function slow.report()                -- what the cache says
 function slow.nb()
   print(scored(the.file, "nb", bayes, AccCols)) end
 
+function slow.acqnb()
+  print(scored(the.file, "acqnb", acqnb, AccCols)) end
+
+function slow.rndnb()
+  print(scored(the.file, "rndnb", rndnb, AccCols)) end
+
 function slow.nbauc()
   print(scored(the.file, "nbauc", bayesAuc, AucCols)) end
 
 function slow.rmeans()
-  print(scored(the.file, "rmeans", rmeans, "rank,mae")) end
+  print(scored(the.file, "rmeans", rmeans, "rank,win,mae")) end
 
 function slow.rmeansall()
-  print(scored(the.file, "rmeansall", rmeansall, "rank,mae")) end
+  print(scored(the.file, "rmeansall", rmeansall, "rank,win,mae")) end
+
+-- ---- the forest, pointed at a continuous goal ------------------------
+-- Not a regression tree.  The SPLIT is still the classifier tab
+-- already has: binarize the labelled rows into "better half" vs
+-- "rest" and let the entropy cut do what it does.  Only the LEAF is
+-- read differently -- the mean `y` of the rows that reached it.
+-- Deep trees (depth=12 leaf=2) put ~2 rows in a leaf, so 30 of those
+-- averaged is a near-continuous score.  A vote share would not be:
+-- it offers `rounds+1` values to rank by, which is exactly why the
+-- FFT arm could not rank (tab-dev/CLAUDE.md).
+function binTab(tbl,rows,y,    ys,mid,names,out,t) --> TAB, +1 klass col
+  ys = {}
+  for _, row in order(rows) do ys[#ys+1] = y(row) end
+  sort(ys, lt)
+  mid = ys[math.floor(#ys / 2) + 1] or 0
+  names = {}
+  for k, s1 in order(tbl.names) do names[k] = s1 end
+  names[#names+1] = "best!"       -- last `!` wins, so this is the klass
+  out = {names}                   -- and the real y columns stay y
+  for _, row in order(rows) do
+    t = {}
+    for k = 1, #tbl.names do t[k] = row[k] end
+    t[#t+1] = y(row) <= mid and "y" or "n"
+    out[#out+1] = t end
+  return Tab(out) end
+
+function leafmean(leaf,y,    a,c)  -- num; mean y of a leaf's rows
+  a, c = 0, 0
+  for _, r in order(leaf.rows) do a, c = a + y(r), c + 1 end
+  return c > 0 and a / c or nil end
+
+function fornum(tr,te,rows,    y,fst)  -- forest over `rows` of `tr`
+  y   = goal(tr)
+  fst = Forest(binTab(tr, rows, y), nil, the.rounds)
+  return score({guess = function(_,row,    s,n,v)
+    s, n = 0, 0
+    for _, m in order(fst.all) do
+      v = leafmean(m:pick(row), y)
+      if v then s, n = s + v, n + 1 end end
+    return n > 0 and s / n or 0 end}, te, y) end
+
+function fornumall(tr,te) return fornum(tr, te, tr.rows) end
+function fornum45(tr,te)
+  return fornum(tr, te, head1(tr.rows, the.budget - the.check)) end
+
+function slow.acq()
+  print(scored(the.file, "acq", acq, "rank,win")) end
+
+function slow.fornumall()
+  print(scored(the.file, "fornumall", fornumall, "rank,win,mae")) end
+
+function slow.fornum45()
+  print(scored(the.file, "fornum45", fornum45, "rank,win,mae")) end
 
 if (arg and arg[0] or ""):find"tab%-eg%.lua$" then
   the = cli()               -- read late, so that a bare `rmeans` is an
