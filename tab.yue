@@ -1,16 +1,4 @@
 -- <!--- vim: set ts=2 sw=2 sts=2 et cc=75 : -->
--- tab.yue: tab.lua, ported to yuescript.  Same algorithm, same
--- golden values.  Three lua idioms go away: the `_ENV` trick (yue
--- builds the export table at the foot), the scratch-parameter locals
--- (yue scopes a local at its first assignment), and the explicit
--- `self` (yue's `=>` and `@`).  What replaces them is listed in the
--- notes at the foot of this file.
---
--- One yue hazard, for whoever edits this next: an assignment to a
--- name already local in an enclosing scope writes THAT name.  So a
--- function that wants its own `near` must say `local near` first, or
--- it will overwrite the module's `near` test helper.  Marked below.
-
 local rng          -- the generator's state; private, unlike lua's _ENV
 local *            -- forward declare the rest, so order stops mattering
 
@@ -50,7 +38,7 @@ Any flag above can lead an action, so `seed=1 --split` is a thing.]]
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
 
-TAB, NUM, SYM, RMEANS, NB, TREE, FOREST = {}, {}, {}, {}, {}, {}, {}
+TAB, NUM, SYM, NB, TREE, FOREST = {}, {}, {}, {}, {}, {}
 
 -- ---- values ---------------------------------------------------------
 values = (s) ->                   -- row; values from comma-separated `s`
@@ -468,36 +456,6 @@ TAB.cut = (rows, cols) =>
     col1 = col
     hist col, rows, @kodeAt, @nk, offer
   bs and {col: bc, v: bv}
-
--- ---- rmeans ---------------------------------------------------------
-Rmeans = (tbl, rows, y) ->        -- RMEANS; per x column, its bins' y
-  i = new RMEANS, {all: Num!, has: {}}   -- means and the variance cut
-  sub = tbl\clone rows
-  i.cols = sub.x
-  adds sub.rows, i.all, y
-  for _, col in order sub.x
-    bins = {}
-    for _, row in order sub.rows
-      b = col\bin row[col.at]
-      bins[b] = bins[b] or Num!
-      bins[b]\add y(row)
-    on = (v) -> v.n / i.all.n * (v\div! ^ 2)
-    w = (i.all\div! ^ 2) - sum(bins, on)
-    i.has[col.at] = {bins: bins, w: max(0, w)}
-  i
-
-RMEANS.like = (col, row): nil =>  -- num,num; `col`'s m-estimated guess
-  it = @has[col.at]               -- for `row`, and its worth
-  v = it and it.bins[col\bin(row[col.at])]
-  if v and it.w > 0
-    return (v.n * v.mu + the.m * @all.mu) / (v.n + the.m), it.w
-
-RMEANS.guess = (row) =>           -- num; `row`'s guess: the worth-
-  s, w = 0, 0                     -- weighted mean of every column's like
-  for _, col in order @cols
-    g, wt = @like(col, row)
-    s, w = s + wt * g, w + wt if g
-  w > 0 and s / w or @all.mu
 
 -- ---- bayes ----------------------------------------------------------
 Nb = (tbl, rows) ->               -- NB; one sub-TAB per klass in `rows`
@@ -962,26 +920,6 @@ eg["--all"] = (): nil ->
     worst, who = ms, k if ms > worst
   print fmt("PASS %s tests, worst %s at %.1fms", #keys, who, worst)
 
-slow["--secs"] = (): nil ->       -- time rmeans: train, then guess
-  file = the.file or the.train
-  tbl, tot = Tab(file), 0
-  for r = 1, the.reps
-    seed(the.seed + r)
-    tr, te = tbl\split!
-    sub = tbl\clone(tr)
-    y = (row) -> sub\ydist row
-    lim = the.budget - the.check
-    t0 = os.clock!
-    few = {}
-    for j = 1, (#tr < lim and #tr or lim)
-      few[j] = tr[j]
-    model = Rmeans(tbl, few, y)
-    for _, row in order te
-      model\guess row
-    tot += (os.clock! - t0)
-  print fmt("%s rows=%6d secs=%.4f",
-            file\match("([^/]+)%.csv$"), #tbl.rows, tot / the.reps)
-
 eg["--values"] = (): nil ->
   t = values " 4.2, x,3"
   print logfmt({got: o(t)})
@@ -1047,16 +985,6 @@ eg["--split"] = (): nil ->
   ok #te, 80
   ok table.concat(tr[1], ","), "6,145,76,81,2,3160,19.6,30"
   ok t.rows[1][1], 8           -- t.rows itself was not disturbed
-
-eg["--rmeans"] = (): nil ->
-  t, few = Tab(the.train), {}
-  y = (row) -> t\ydist row
-  for k = 1, 45
-    few[k] = t.rows[k]
-  m = Rmeans(t, few, y)
-  print logfmt({mu: m.all.mu, guess: m\guess(t.rows[1])})
-  ok m.all.mu, 0.9009519530
-  ok m\guess(t.rows[1]), 0.8530303902
 
 eg["--nb"] = (): nil ->
   t = Tab {
@@ -1136,8 +1064,8 @@ if main\find("tab%.yue$") or main\find("tab%.lua$")
 setmetatable {
     :the, :help, :eg, :slow
     :floor, :exp, :sqrt, :log, :abs, :min, :max
-    :TAB, :NUM, :SYM, :RMEANS, :NB, :TREE, :FOREST
-    :values, :csv, :Col, :Sym, :Num, :Tab, :Rmeans, :Nb, :Tree, :Forest
+    :TAB, :NUM, :SYM, :NB, :TREE, :FOREST
+    :values, :csv, :Col, :Sym, :Num, :Tab, :Nb, :Tree, :Forest
     :new, :cli, :seed, :rint, :shuffle, :some, :pick
     :map, :sum, :adds, :best, :same, :lt, :sort, :sortBy, :order
     :acquire

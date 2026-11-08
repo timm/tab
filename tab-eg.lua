@@ -227,15 +227,6 @@ function goal(tbl,    col) --> fn; a `fn` that scores one `row`.  For
     return function(row) return tonumber(row[col.at]) or col.mu end end
   return function(row) return tbl:ydist(row) end end
 
-function rmeans(tr,te,    y,lim)    -- the frugal arm: budget labels
-  y   = goal(tr)
-  lim = the.budget - the.check
-  return score(Rmeans(tr, head1(tr.rows, lim), y), te, y) end
-
-function rmeansall(tr,te,    y)     -- the rich arm: every train row
-  y = goal(tr)
-  return score(Rmeans(tr, tr.rows, y), te, y) end
-
 -- The same label budget as `rmeans`, spent on rows `acquire` chose
 -- rather than on the first 45 a shuffle handed over.  It has no y
 -- model, so there is no mae to report -- but `top` only ever asks
@@ -511,12 +502,6 @@ function slow.rndnb()
 
 function slow.nbauc()
   print(scored(the.file, "nbauc", bayesAuc, AucCols)) end
-
-function slow.rmeans()
-  print(scored(the.file, "rmeans", rmeans, "rank,win,mae")) end
-
-function slow.rmeansall()
-  print(scored(the.file, "rmeansall", rmeansall, "rank,win,mae")) end
 
 -- ---- the forest, pointed at a continuous goal ------------------------
 -- Not a regression tree.  The SPLIT is still the classifier tab

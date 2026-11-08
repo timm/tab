@@ -1,18 +1,6 @@
 -- <!--- vim: set ts=2 sw=2 sts=2 et cc=75 : -->
--- tab.yue: tab.lua, ported to yuescript.  Same algorithm, same
--- golden values.  Three lua idioms go away: the `_ENV` trick (yue
--- builds the export table at the foot), the scratch-parameter locals
--- (yue scopes a local at its first assignment), and the explicit
--- `self` (yue's `=>` and `@`).  What replaces them is listed in the
--- notes at the foot of this file.
---
--- One yue hazard, for whoever edits this next: an assignment to a
--- name already local in an enclosing scope writes THAT name.  So a
--- function that wants its own `near` must say `local near` first, or
--- it will overwrite the module's `near` test helper.  Marked below.
-
 local rng
-local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, RMEANS, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, ThisC, ThatC, Hist, clog, ent, sc, binRows, tally, hist, Rmeans, Nb, Tree, Forest, acquire, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, sortBy, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
+local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, ThisC, ThatC, Hist, clog, ent, sc, binRows, tally, hist, Nb, Tree, Forest, acquire, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, sortBy, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
 
 the = { }
 help = [[tab: a good guess from a few dozen labels.
@@ -49,7 +37,7 @@ Any flag above can lead an action, so `seed=1 --split` is a thing.]]
 floor, exp, sqrt, log = math.floor, math.exp, math.sqrt, math.log
 abs, min, max = math.abs, math.min, math.max
 
-TAB, NUM, SYM, RMEANS, NB, TREE, FOREST = { }, { }, { }, { }, { }, { }, { }
+TAB, NUM, SYM, NB, TREE, FOREST = { }, { }, { }, { }, { }, { }
 
 -- ---- values ---------------------------------------------------------
 values = function(s)
@@ -687,55 +675,6 @@ TAB.cut = function(self, rows, cols)
     col = bc,
     v = bv
   }
-end
-
--- ---- rmeans ---------------------------------------------------------
-Rmeans = function(tbl, rows, y)
-  local i = new(RMEANS, {
-    all = Num(),
-    has = { }
-  })
-  local sub = tbl:clone(rows)
-  i.cols = sub.x
-  adds(sub.rows, i.all, y)
-  for _, col in order(sub.x) do
-    local bins = { }
-    for _, row in order(sub.rows) do
-      local b = col:bin(row[col.at])
-      bins[b] = bins[b] or Num()
-      bins[b]:add(y(row))
-    end
-    local on
-    on = function(v)
-      return v.n / i.all.n * (v:div() ^ 2)
-    end
-    local w = (i.all:div() ^ 2) - sum(bins, on)
-    i.has[col.at] = {
-      bins = bins,
-      w = max(0, w)
-    }
-  end
-  return i
-end
-
-RMEANS.like = function(self, col, row)
-  local it = self.has[col.at]
-  local v = it and it.bins[col:bin(row[col.at])]
-  if v and it.w > 0 then
-    return (v.n * v.mu + the.m * self.all.mu) / (v.n + the.m), it.w
-  end
-  return nil
-end
-
-RMEANS.guess = function(self, row)
-  local s, w = 0, 0
-  for _, col in order(self.cols) do
-    local g, wt = self:like(col, row)
-    if g then
-      s, w = s + wt * g, w + wt
-    end
-  end
-  return w > 0 and s / w or self.all.mu
 end
 
 -- ---- bayes ----------------------------------------------------------
@@ -1436,33 +1375,6 @@ eg["--all"] = function()
   return nil
 end
 
-slow["--secs"] = function()
-  local file = the.file or the.train
-  local tbl, tot = Tab(file), 0
-  for r = 1, the.reps do
-    seed(the.seed + r)
-    local tr, te = tbl:split()
-    local sub = tbl:clone(tr)
-    local y
-    y = function(row)
-      return sub:ydist(row)
-    end
-    local lim = the.budget - the.check
-    local t0 = os.clock()
-    local few = { }
-    for j = 1, (#tr < lim and #tr or lim) do
-      few[j] = tr[j]
-    end
-    local model = Rmeans(tbl, few, y)
-    for _, row in order(te) do
-      model:guess(row)
-    end
-    tot = tot + (os.clock() - t0)
-  end
-  print(fmt("%s rows=%6d secs=%.4f", file:match("([^/]+)%.csv$"), #tbl.rows, tot / the.reps))
-  return nil
-end
-
 eg["--values"] = function()
   local t = values(" 4.2, x,3")
   print(logfmt({
@@ -1595,25 +1507,6 @@ eg["--split"] = function()
   ok(#te, 80)
   ok(table.concat(tr[1], ","), "6,145,76,81,2,3160,19.6,30")
   ok(t.rows[1][1], 8)
-  return nil
-end
-
-eg["--rmeans"] = function()
-  local t, few = Tab(the.train), { }
-  local y
-  y = function(row)
-    return t:ydist(row)
-  end
-  for k = 1, 45 do
-    few[k] = t.rows[k]
-  end
-  local m = Rmeans(t, few, y)
-  print(logfmt({
-    mu = m.all.mu,
-    guess = m:guess(t.rows[1])
-  }))
-  ok(m.all.mu, 0.9009519530)
-  ok(m:guess(t.rows[1]), 0.8530303902)
   return nil
 end
 
@@ -1815,7 +1708,6 @@ return setmetatable({
   TAB = TAB,
   NUM = NUM,
   SYM = SYM,
-  RMEANS = RMEANS,
   NB = NB,
   TREE = TREE,
   FOREST = FOREST,
@@ -1825,7 +1717,6 @@ return setmetatable({
   Sym = Sym,
   Num = Num,
   Tab = Tab,
-  Rmeans = Rmeans,
   Nb = Nb,
   Tree = Tree,
   Forest = Forest,
