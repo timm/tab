@@ -254,6 +254,56 @@ function acq(tr,te,    y,best,rest,bmid,rmid,ys)
                                   - tr:xdist(row,rmid) end}, te, y)
   return ("%.3f,%d"):format(pct(best, ys), gap(best, ys)) end
 
+-- `acq` with the acquiring taken out.  Grab the first 45 rows a
+-- shuffle hands over, label every one, call the best sqrt(45) of them
+-- `best` and the remainder `rest`, and rank the test set on that same
+-- near-best/far-rest key.  Same budget, same split, same scoring --
+-- the only thing missing is the CHOOSING.  So whatever `acq` scores
+-- above this is what the acquisition step is worth and nothing else;
+-- if the two land together, the steering bought nothing and `rmeans`
+-- and `acq` were only ever being compared on their models.
+function grab(tr,te,    y,pool,got,k,best,rest,bmid,rmid,ys)
+  y    = goal(tr)
+  pool = shuffle(map(tr.rows, same))   -- a copy, never `tr.rows`
+  got  = {}
+  for j = 1, math.min(the.budget - the.check, #pool) do
+    got[j] = pool[j] end
+  -- `acquire` ends holding the top sqrt(n) by y in `best`; land in
+  -- the same place, so the two arms differ in how the 45 were picked
+  -- and in nothing downstream of that.
+  sortBy(got, y)
+  k = math.floor((#got) ^ .5)   -- `^` binds tighter than `#`
+  best, rest = tr:clone(), tr:clone()
+  for j, row in order(got) do
+    if j <= k then best:add(row) else rest:add(row) end end
+  bmid, rmid = best:mids(), rest:mids()
+  best, ys = top5y(
+    {guess = function(_,row) return tr:xdist(row,bmid)
+                                  - tr:xdist(row,rmid) end}, te, y)
+  return ("%.3f,%d"):format(pct(best, ys), gap(best, ys)) end
+
+-- Full ezr: `acquire` picks the 45, then a SOLO tree models them.
+-- `acq` above reads those same 45 as two centroids and ranks on the
+-- distance between them; this reads them as a tree and ranks on the
+-- mean y of the leaf a test row lands in.  Same rows, same budget,
+-- two different readings -- so the gap between the two arms is what
+-- the tree adds over the centroids and nothing else.
+--
+-- `Tree`, not `Forest`.  A forest bootstraps (`some(rows,#rows)`, with
+-- replacement) and redraws sqrt(#x) columns at every node: both are
+-- variance bought for an ensemble's benefit, and a solo tree only
+-- pays for them -- the bootstrap alone would cost ~17 of the 45 rows.
+-- So: every row, `cols=0` for every column, and the entropy cut
+-- itself is reused untouched rather than written a second time.
+function acqtree(tr,te,    y,rows,bt,tree)
+  y          = goal(tr)
+  rows       = acquire(tr, the.budget - the.check, y)
+  bt         = binTab(tr, rows, y)
+  tree       = Tree(bt, bt.rows, 1, 0)
+  return score({guess = function(_,row,    v)
+    v = leafmean(tree:pick(row), y)
+    return v or 0 end}, te, y) end
+
 -- ---- acquire, one model per klass ------------------------------------
 -- `acquire` in tab.yue ranks rows against ONE best/rest pair, which is
 -- what a single continuous goal wants.  A klass column has no such
@@ -514,6 +564,12 @@ function fornum45(tr,te)
 
 function slow.acq()
   print(scored(the.file, "acq", acq, "rank,win")) end
+
+function slow.grab()
+  print(scored(the.file, "grab", grab, "rank,win")) end
+
+function slow.acqtree()
+  print(scored(the.file, "acqtree", acqtree, "rank,win,mae")) end
 
 function slow.fornumall()
   print(scored(the.file, "fornumall", fornumall, "rank,win,mae")) end
