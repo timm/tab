@@ -117,22 +117,19 @@ SYM.div = function(self)
   return self.n < 1 and 0 or max(0, log(self.n) - self.cl / self.n) / log(2)
 end
 
--- The mode, with a tie broken on `tostring` -- once per node, not
--- once per candidate cut, so the sort is affordable and `pairs`
--- order (which differs between ports) never decides a leaf's label.
+-- The mode, with a tie broken on `tostring` so that `pairs` order
+-- (which differs between ports) never decides a leaf's label.  The
+-- tie-break is the only reason this ever sorted, and it does the same
+-- work inside the scan: one pass, no key list, no comparator.
+-- No trailing locals in the signature: `NUM.mid` takes none, the two
+-- are dispatched interchangeably through `col\mid!`, and a method
+-- that quietly accepts arguments its twin ignores is a trap.
 SYM.mid = function(self)
-  local ks = { }
-  for v in pairs(self.has) do
-    ks[#ks + 1] = v
-  end
-  sort(ks, function(x, y)
-    return tostring(x) < tostring(y)
-  end)
   local bk
   local b = -1
-  for _, v in order(ks) do
-    if self.has[v] > b then
-      b, bk = self.has[v], v
+  for v, c in pairs(self.has) do
+    if c > b or (c == b and tostring(v) < tostring(bk)) then
+      b, bk = c, v
     end
   end
   return bk
@@ -199,12 +196,12 @@ NUM.holds = function(self, x, v)
   return x == "?" or x <= v
 end
 -- cut never loses a row
+-- `min` is defence, not arithmetic: `norm` is a logistic cdf with `z`
+-- clipped at 3, so it tops out at 1/(1+exp(-5.1)) = 0.993944 and
+-- `the.bins * norm` never reaches `the.bins`.  The clamp is here for
+-- a `norm` that could return exactly 1.
 NUM.bin = function(self, v)
-  if v == "?" then
-    return v
-  end
-  local b = 1 + floor(the.bins * self:norm(v))
-  return b > the.bins and the.bins or b
+  return v == "?" and v or min(the.bins, 1 + floor(the.bins * self:norm(v)))
 end
 
 NUM.norm = function(self, v)
@@ -305,11 +302,11 @@ TAB.clone = function(self, rows, how)
 end
 
 TAB.mid = function(self, cols)
-  local u = { }
+  local _tbl_0 = { }
   for _, col in order((cols or self.cols)) do
-    u[col.txt] = col:mid()
+    _tbl_0[col.txt] = col:mid()
   end
-  return u
+  return _tbl_0
 end
 
 -- An unknown goal reads as that column's middle -- the same call
@@ -358,25 +355,42 @@ end
 -- `mid` keys on `col.txt` because its reader is `logfmt`.  `xdist`
 -- reads a row, so it needs one keyed on `col.at` instead.
 TAB.mids = function(self)
-  local u = { }
+  local _tbl_0 = { }
   for _, col in order(self.cols) do
-    u[col.at] = col:mid()
+    _tbl_0[col.at] = col:mid()
   end
-  return u
+  return _tbl_0
 end
 
+local _anon_func_0 = function(n, rows)
+  local _accum_0 = { }
+  local _len_0 = 1
+  local _max_0 = n
+  _max_0 = _max_0 < 0 and #rows + _max_0 + 1 or _max_0
+  for _index_0 = 1, _max_0 do
+    local _item_0 = rows[_index_0]
+    _accum_0[_len_0] = _item_0
+    _len_0 = _len_0 + 1
+  end
+  return _accum_0
+end
+local _anon_func_1 = function(n, rows)
+  local _accum_0 = { }
+  local _len_0 = 1
+  local _min_0 = n + 1
+  local _max_0 = #rows
+  _min_0 = _min_0 < 0 and #rows + _min_0 + 1 or _min_0
+  for _index_0 = _min_0, _max_0 do
+    local _item_0 = rows[_index_0]
+    _accum_0[_len_0] = _item_0
+    _len_0 = _len_0 + 1
+  end
+  return _accum_0
+end
 TAB.split = function(self)
   local rows = shuffle(map(self.rows, same))
   local n = floor(.8 * #rows)
-  local u1, u2 = { }, { }
-  local t = u1
-  for j, row in order(rows) do
-    if j > n then
-      t = u2
-    end
-    t[#t + 1] = row
-  end
-  return u1, u2
+  return _anon_func_0(n, rows), _anon_func_1(n, rows)
 end
 
 -- Offer `out` every cut of every x column over `rows`: `ks` is one
@@ -446,19 +460,26 @@ end
 
 -- A symbolic column's bins are its own values, indexed once, sorted
 -- so a tie falls where it always did.
-SYM.index = function(self, vs, v, n)
+SYM.index = function(self, vs)
   if not self.vi then
-    vs = { }
-    for v in pairs(self.has) do
-      vs[#vs + 1] = v
+    do
+      local _accum_0 = { }
+      local _len_0 = 1
+      for v in pairs(self.has) do
+        _accum_0[_len_0] = v
+        _len_0 = _len_0 + 1
+      end
+      vs = _accum_0
     end
     sort(vs, function(a, b)
       return tostring(a) < tostring(b)
     end)
-    self.vi, self.vs = { }, vs
-    for n = 1, #vs do
-      self.vi[vs[n]] = n
+    self.vs = vs
+    local _tbl_0 = { }
+    for n, v in ipairs(vs) do
+      _tbl_0[v] = n
     end
+    self.vi = _tbl_0
   end
   return self.vi
 end
@@ -724,12 +745,17 @@ end
 -- `pairs` has no order, so a klass tie used to fall whichever way
 -- the hash happened to lie.  Sort the keys once and every tie after
 -- goes to the same klass in lua, yue and python alike.
-NB.klasses = function(self)
-  local ks = { }
+local _anon_func_2 = function(pairs, self)
+  local _accum_0 = { }
+  local _len_0 = 1
   for k in pairs(self.subs) do
-    ks[#ks + 1] = k
+    _accum_0[_len_0] = k
+    _len_0 = _len_0 + 1
   end
-  return sort(ks, function(a, b)
+  return _accum_0
+end
+NB.klasses = function(self)
+  return sort(_anon_func_2(pairs, self), function(a, b)
     return tostring(a) < tostring(b)
   end)
 end
@@ -763,11 +789,11 @@ NB.posts = function(self, row)
     t[k] = exp(t[k] - hi)
     z = z + t[k]
   end
-  local u = { }
+  local _tbl_0 = { }
   for _, k in order(ks) do
-    u[k] = t[k] / z
+    _tbl_0[k] = t[k] / z
   end
-  return u
+  return _tbl_0
 end
 
 -- ---- tree -----------------------------------------------------------
@@ -1036,9 +1062,18 @@ acquire = function(tab, cap, y)
     end)
   end
   local pool = shuffle(map(tab.rows, same))
-  local todo = { }
-  for j = 1, min(the.few, #pool) do
-    todo[#todo + 1] = pool[j]
+  local todo
+  do
+    local _accum_0 = { }
+    local _len_0 = 1
+    local _max_0 = min(the.few, #pool)
+    _max_0 = _max_0 < 0 and #pool + _max_0 + 1 or _max_0
+    for _index_0 = 1, _max_0 do
+      local _item_0 = pool[_index_0]
+      _accum_0[_len_0] = _item_0
+      _len_0 = _len_0 + 1
+    end
+    todo = _accum_0
   end
   local both = tab:clone()
   for _ = 1, min(the.first, #todo) do
@@ -1134,11 +1169,13 @@ end
 -- n=#t about 63% of `t` turns up at least once, so the rest is that
 -- member's out-of-bag rows -- free held-out data, no extra split.
 some = function(t, n)
-  local u = { }
-  for k = 1, n or #t do
-    u[k] = t[rint(#t)]
+  local _accum_0 = { }
+  local _len_0 = 1
+  for _ = 1, n or #t do
+    _accum_0[_len_0] = t[rint(#t)]
+    _len_0 = _len_0 + 1
   end
-  return u
+  return _accum_0
 end
 
 -- `n` of `t`, no replacement; all of `t` when `n` is 0 or too big.
@@ -1152,8 +1189,8 @@ pick = function(t, n)
   if not n or n == 0 or n >= #t then
     return t
   end
-  for k = 1, #t do
-    Drawn[k] = t[k]
+  for k, v in ipairs(t) do
+    Drawn[k] = v
   end
   for k = #Drawn, #t + 1, -1 do
     Drawn[k] = nil
@@ -1256,9 +1293,14 @@ o = function(x)
   end
   local u = { }
   if #x > 0 then
-    for _, v in ipairs(x) do
-      u[#u + 1] = o(v)
+    local _accum_0 = { }
+    local _len_0 = 1
+    for _index_0 = 1, #x do
+      local v = x[_index_0]
+      _accum_0[_len_0] = o(v)
+      _len_0 = _len_0 + 1
     end
+    u = _accum_0
   else
     for k, v in pairs(x) do
       if k ~= "it" and type(v) ~= "function" then
@@ -1270,9 +1312,15 @@ o = function(x)
 end
 
 print = function(...)
-  local out = { }
-  for j = 1, select("#", ...) do
-    out[j] = o((select(j, ...)))
+  local out
+  do
+    local _accum_0 = { }
+    local _len_0 = 1
+    for j = 1, select("#", ...) do
+      _accum_0[_len_0] = o((select(j, ...)))
+      _len_0 = _len_0 + 1
+    end
+    out = _accum_0
   end
   io.write(table.concat(out, "\t"), "\n")
   return nil
@@ -1469,9 +1517,18 @@ eg["--acq"] = function()
   local got, rest
   got, best, rest = acquire(tab:clone(tr))
   local held = tab:rank(map(te, same), best, rest)
-  local top = { }
-  for j = 1, min(the.check, #held) do
-    top[#top + 1] = held[j]
+  local top
+  do
+    local _accum_0 = { }
+    local _len_0 = 1
+    local _max_0 = min(the.check, #held)
+    _max_0 = _max_0 < 0 and #held + _max_0 + 1 or _max_0
+    for _index_0 = 1, _max_0 do
+      local _item_0 = held[_index_0]
+      _accum_0[_len_0] = _item_0
+      _len_0 = _len_0 + 1
+    end
+    top = _accum_0
   end
   print(logfmt({
     n = #got,

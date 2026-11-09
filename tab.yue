@@ -89,18 +89,18 @@ SYM.add = (v, inc=1): v =>        -- value; `inc` more of `v` (-1 = less)
 SYM.div = =>                      -- num; entropy, in bits
   @n < 1 and 0 or max(0, log(@n) - @cl / @n) / log(2)
 
--- The mode, with a tie broken on `tostring` -- once per node, not
--- once per candidate cut, so the sort is affordable and `pairs`
--- order (which differs between ports) never decides a leaf's label.
+-- The mode, with a tie broken on `tostring` so that `pairs` order
+-- (which differs between ports) never decides a leaf's label.  The
+-- tie-break is the only reason this ever sorted, and it does the same
+-- work inside the scan: one pass, no key list, no comparator.
+-- No trailing locals in the signature: `NUM.mid` takes none, the two
+-- are dispatched interchangeably through `col\mid!`, and a method
+-- that quietly accepts arguments its twin ignores is a trap.
 SYM.mid = =>                      -- value; the mode
-  ks = {}
-  for v in pairs @has
-    ks[] = v
-  sort ks, (x, y) -> tostring(x) < tostring(y)
   local bk                        -- `local`: assigned inside the loop
   b = -1
-  for _, v in order ks
-    b, bk = @has[v], v if @has[v] > b
+  for v, c in pairs @has
+    b, bk = c, v if c > b or (c == b and tostring(v) < tostring(bk))
   bk
 
 SYM.norm = (v) => v               -- value; a sym is its own norm
@@ -108,7 +108,7 @@ SYM.holds = (x, v) => x == "?" or x == v
 SYM.bin = (v) => v                -- value; and its own bin
 
 SYM.nVals = =>                    -- int; values `@` has seen, at least 2
-  @kinds = @kinds or max(2, sum(@has, -> 1))
+  @kinds or= max(2, sum(@has, -> 1))
   @kinds
 
 Num = (txt="N", at=0) ->          -- NUM; Welford summary of column `at`
@@ -129,10 +129,12 @@ NUM.div = => @n < 2 and 0 or sqrt(max(@m2, 0) / (@n - 1))
 NUM.mid = => @mu                  -- num; the mean
 NUM.holds = (x, v) => x == "?" or x <= v  -- bool; "?" says yes, so a
                                           -- cut never loses a row
+-- `min` is defence, not arithmetic: `norm` is a logistic cdf with `z`
+-- clipped at 3, so it tops out at 1/(1+exp(-5.1)) = 0.993944 and
+-- `the.bins * norm` never reaches `the.bins`.  The clamp is here for
+-- a `norm` that could return exactly 1.
 NUM.bin = (v) =>                  -- value; `v`'s bin, 1..`the.bins`
-  return v if v == "?"
-  b = 1 + floor(the.bins * @norm(v))
-  b > the.bins and the.bins or b
+  v == "?" and v or min the.bins, 1 + floor(the.bins * @norm(v))
 
 NUM.norm = (v) =>                 -- value; `v` on a logistic cdf,
   return v if v == "?"            -- clipped at three standard deviations
@@ -185,10 +187,7 @@ TAB.clone = (rows={}, how) =>     -- TAB; `rows` in a fresh TAB
   Tab out
 
 TAB.mid = (cols) =>               -- dict; {name: middle}, for logfmt
-  u = {}
-  for _, col in order (cols or @cols)
-    u[col.txt] = col\mid!
-  u
+  {col.txt, col\mid! for _, col in order (cols or @cols)}
 
 -- An unknown goal reads as that column's middle -- the same call
 -- `goal` in tab-eg already makes for a missing regression target.
@@ -220,20 +219,12 @@ TAB.xdist = (r1, r2) =>           -- num; how far apart two rows are, on x
 -- `mid` keys on `col.txt` because its reader is `logfmt`.  `xdist`
 -- reads a row, so it needs one keyed on `col.at` instead.
 TAB.mids = =>                     -- row; every column's middle, by `at`
-  u = {}
-  for _, col in order @cols
-    u[col.at] = col\mid!
-  u
+  {col.at, col\mid! for _, col in order @cols}
 
 TAB.split = =>                    -- rows,rows; 80:20, off a copy:
   rows = shuffle map(@rows, same) -- never @rows itself
   n = floor(.8 * #rows)
-  u1, u2 = {}, {}
-  t = u1
-  for j, row in order rows
-    t = u2 if j > n
-    t[] = row
-  u1, u2
+  rows[, n], rows[n + 1, ]
 
 -- Offer `out` every cut of every x column over `rows`: `ks` is one
 -- y per row; `Y` collects them, so what "least diversity" means --
@@ -295,15 +286,12 @@ NUM.slot  = (x) =>                 -- nil when there is nothing to cut
 
 -- A symbolic column's bins are its own values, indexed once, sorted
 -- so a tie falls where it always did.
-SYM.index = (    vs,v,n) =>
+SYM.index = (    vs) =>
   unless @vi
-    vs = {}
-    for v in pairs @has
-      vs[] = v
+    vs = [v for v in pairs @has]
     sort vs, (a, b) -> tostring(a) < tostring(b)
-    @vi, @vs = {}, vs
-    for n = 1, #vs
-      @vi[vs[n]] = n
+    @vs = vs
+    @vi = {v, n for n, v in ipairs vs}
   @vi
 SYM.slots = => @index! and #@vs
 SYM.edge  = (b) => @vs[b]
@@ -489,10 +477,7 @@ NB.like = (sub, row, cols = sub.x) =>   -- num; log P(`row` | `sub:TAB`)
 -- the hash happened to lie.  Sort the keys once and every tie after
 -- goes to the same klass in lua, yue and python alike.
 NB.klasses = =>                   -- list; `@subs`'s keys, sorted
-  ks = {}
-  for k in pairs @subs
-    ks[] = k
-  sort ks, (a, b) -> tostring(a) < tostring(b)
+  sort [k for k in pairs @subs], (a, b) -> tostring(a) < tostring(b)
 
 NB.guess = (row) =>               -- value; `row`'s likeliest klass
   local b, bk, v
@@ -517,10 +502,7 @@ NB.posts = (row) =>               -- dict; p(klass | `row`)
   for _, k in order ks
     t[k] = exp(t[k] - hi)
     z += t[k]
-  u = {}
-  for _, k in order ks
-    u[k] = t[k] / z
-  u
+  {k, t[k] / z for _, k in order ks}
 
 -- ---- tree -----------------------------------------------------------
 -- One node over `rows`, summarized, then grown.  `cols` is how many
@@ -692,9 +674,7 @@ FOREST.guess = (row) =>           -- value; the most voted
 -- smallest best.  Pointed the wrong way, the arm scores 5 of 59.
 acquire = (tab, cap=the.budget - the.check, y=((r) -> tab\ydist r)) ->
   pool = shuffle map(tab.rows, same)   -- a copy, never `tab.rows`
-  todo = {}
-  for j = 1, min(the.few, #pool)
-    todo[] = pool[j]
+  todo = pool[, min(the.few, #pool)]
   both = tab\clone!
   for _ = 1, min(the.first, #todo)
     both\add table.remove(todo)
@@ -762,10 +742,7 @@ shuffle = (t) ->                  -- `t`, Fisher-Yates shuffled in place
 -- n=#t about 63% of `t` turns up at least once, so the rest is that
 -- member's out-of-bag rows -- free held-out data, no extra split.
 some = (t, n) ->
-  u = {}
-  for k = 1, n or #t
-    u[k] = t[rint(#t)]
-  u
+  [t[rint(#t)] for _ = 1, n or #t]
 
 -- `n` of `t`, no replacement; all of `t` when `n` is 0 or too big.
 -- Shuffles a copy on tab's own `rint`, so a draw is a seed.
@@ -776,8 +753,8 @@ some = (t, n) ->
 Drawn = {}
 pick = (t, n) ->
   return t if not n or n == 0 or n >= #t
-  for k = 1, #t
-    Drawn[k] = t[k]
+  for k, v in ipairs t
+    Drawn[k] = v
   for k = #Drawn, #t + 1, -1      -- a shorter column list than last
     Drawn[k] = nil                -- time must not leave a tail
   shuffle Drawn
@@ -841,8 +818,7 @@ o = (x) ->                        -- str; `x` as text, fractions through
     return tostring(x == floor(x) and floor(x) or the.fmt\format(x))
   u = {}
   if #x > 0
-    for _, v in ipairs x
-      u[] = o(v)
+    u = [o(v) for v in *x]
   else
     for k, v in pairs x
       if k != "it" and type(v) != "function"
@@ -850,9 +826,7 @@ o = (x) ->                        -- str; `x` as text, fractions through
   "{" .. table.concat((#x > 0 and u or sort(u, lt)), " ") .. "}"
 
 print = (...): nil ->             -- print the lot, tab separated, via `o`
-  out = {}
-  for j = 1, select("#", ...)
-    out[j] = o((select(j, ...)))
+  out = [o((select(j, ...))) for j = 1, select("#", ...)]
   io.write table.concat(out, "\t"), "\n"
 
 fmt = (s, ...) -> s\format ...
@@ -964,9 +938,7 @@ eg["--acq"] = (): nil ->          -- where a budget of labels landed
   tr, te = tab\split!             -- acquire on the 80, rank the 20 it
   got, best, rest = acquire tab\clone tr        -- has never been shown
   held = tab\rank map(te, same), best, rest
-  top = {}
-  for j = 1, min(the.check, #held)
-    top[] = held[j]
+  top = held[, min(the.check, #held)]
   print logfmt {n: #got, acqBest: (mu got), acqMu: select(2, mu got),
                 top5: (mu top), heldBest: (mu te), heldMu: select(2, mu te)}
   ok (mu top), 0.1569024159
