@@ -1,6 +1,6 @@
 -- <!--- vim: set ts=2 sw=2 sts=2 et cc=75 : -->
 local rng
-local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, ThisC, ThatC, Hist, clog, ent, sc, binRows, tally, hist, Nb, Tree, Forest, acquire, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, sortBy, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
+local the, help, floor, exp, sqrt, log, abs, min, max, TAB, NUM, SYM, NB, TREE, FOREST, values, csv, Col, Sym, Num, Tab, Nb, Tree, Forest, acquire, new, cli, seed, rint, shuffle, some, Drawn, pick, map, sum, adds, best, same, lt, sort, sortBy, order, o, print, fmt, logfmt, about, eg, slow, near, ok, run, halves, main
 
 the = { }
 help = [[tab: a good guess from a few dozen labels.
@@ -101,10 +101,8 @@ SYM.add = function(self, v, inc)
       self.cl = self.cl - (c * log(c))
     end
     c = c + inc
-    if c <= 0 then
-      self.has[v] = nil
-    else
-      self.has[v] = c
+    self.has[v] = c > 0 and c or nil
+    if c > 0 then
       self.cl = self.cl + (c * log(c))
     end
   end
@@ -426,250 +424,273 @@ end
 -- to finish before the next begins, or these three quietly corrupt.
 -- `TREE.grow` obeys that -- it takes its cut, then recurses -- and a
 -- threaded forest would not.
-ThisC, ThatC, Hist = { }, { }, { }
+local binRows, hist
+-- here; the rest, and the three buffers, are
+-- sealed in so nothing new can reach them
+do
+  local ThisC, ThatC, Hist = { }, { }, { }
 
--- ---- binning, on the column itself --------------------------------
--- A column knows its own bins.  `slot` puts a value in one, `edge`
--- turns a bin back into the threshold to report, `slots` says how
--- many there are.  Numeric edges come off the summary the column
--- already keeps, so they are computed once and then shared by every
--- tree and every node of the ensemble -- which is the whole trick:
--- nothing is sorted, and nothing is re-derived per node.
--- The count is forced odd: `slot` clamps to `-hi..hi` and shifts, so
--- there are always `2*hi+1` bins -- one centred on the mean, `hi` to
--- each side.  `slots` must report that, not `the.cuts`, or the bin a
--- 3sd outlier pins to falls outside the range `tally` clears and
--- picks up a stale count.  `cuts=50` and `cuts=51` are the same 51.
-NUM.slots = function(self)
-  return 2 * floor(the.cuts / 2) + 1
-end
-NUM.edge = function(self, b)
-  return self.mu + (b - self.hi - 0.5) * self.r
-end
-NUM.slot = function(self, x)
-  if not self.r then
-    self.hi = floor(the.cuts / 2)
-    self.r = 3 * self:div() / self.hi
+  -- ---- binning, on the column itself --------------------------------
+  -- A column knows its own bins.  `slot` puts a value in one, `edge`
+  -- turns a bin back into the threshold to report, `slots` says how
+  -- many there are.  Numeric edges come off the summary the column
+  -- already keeps, so they are computed once and then shared by every
+  -- tree and every node of the ensemble -- which is the whole trick:
+  -- nothing is sorted, and nothing is re-derived per node.
+  -- The count is forced odd: `slot` clamps to `-hi..hi` and shifts, so
+  -- there are always `2*hi+1` bins -- one centred on the mean, `hi` to
+  -- each side.  `slots` must report that, not `the.cuts`, or the bin a
+  -- 3sd outlier pins to falls outside the range `tally` clears and
+  -- picks up a stale count.  `cuts=50` and `cuts=51` are the same 51.
+  -- `edge` reads `@hi` and `@r` but cannot set them, so before this was
+  -- its own method the memo lived inside `slot` and `edge` crashed on a
+  -- nil `@hi` for any caller that reported a cut before binning a row.
+  -- `SYM.edge` had the same hole against `@vs`.  Both now warm the memo
+  -- they read.
+  NUM.index = function(self)
+    if not self.r then
+      self.hi = floor(the.cuts / 2)
+      self.r = 3 * self:div() / self.hi
+    end
+    return self.r
   end
-  if x == "?" or self.r <= 0 then
+  -- Off the memo, not off `the.cuts`: computing it twice let the two
+  -- disagree.  Change `the.cuts` after a column has binned and `slots`
+  -- said 11 while `slot` still returned up to 51, so `tally` cleared
+  -- 1..11 and bins 12..51 kept the previous node's counts.  Stale and
+  -- consistent is safe; disagreeing is a wrong split you cannot see.
+  NUM.slots = function(self)
+    return self:index() and 2 * self.hi + 1
+  end
+  NUM.edge = function(self, b)
+    return self:index() and self.mu + (b - self.hi - 0.5) * self.r
+  end
+  NUM.slot = function(self, x)
+    if self:index() <= 0 or x == "?" then
+      return nil
+    end
+    local b = floor((x - self.mu) / self.r + 0.5)
+    return min(self.hi, max(-self.hi, b)) + self.hi + 1
+  end
+
+  -- A symbolic column's bins are its own values, indexed once, sorted
+  -- so a tie falls where it always did.
+  SYM.index = function(self, vs)
+    if not self.vi then
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for v in pairs(self.has) do
+          _accum_0[_len_0] = v
+          _len_0 = _len_0 + 1
+        end
+        vs = _accum_0
+      end
+      sort(vs, function(a, b)
+        return tostring(a) < tostring(b)
+      end)
+      self.vs = vs
+      local _tbl_0 = { }
+      for n, v in ipairs(vs) do
+        _tbl_0[v] = n
+      end
+      self.vi = _tbl_0
+    end
+    return self.vi
+  end
+  SYM.slots = function(self)
+    return self:index() and #self.vs
+  end
+  SYM.edge = function(self, b)
+    return self:index() and self.vs[b]
+  end
+  SYM.slot = function(self, x)
+    return x ~= "?" and self:index()[x] or nil
+  end
+
+  -- ---- the histogram ------------------------------------------------
+  -- `SYM.div` is `(log n - cl/n)/log 2` with `cl = sum c*log c`, so a
+  -- count that moves changes exactly one term of cl.  Keeping cl
+  -- current costs two `log`s per changed klass per bin, where walking
+  -- the rows cost one per row.
+  local clog
+  clog = function(c)
+    return c > 0 and c * log(c) or 0
+  end
+
+  -- Entropy of `n` rows whose `sum c*log c` is `cl`, in nats: the
+  -- `/log 2` comes out once, in the score.
+  local ent
+  ent = function(n, cl)
+    return max(0, log(n) - cl / n)
+  end
+
+  -- `n` rows split `this`/`that` score as their sizes weigh their
+  -- entropies -- the same quantity `TAB.cut` used to get from two
+  -- `Sym`s, verified equal to `Sym.div` to 2.7e-15.
+  local sc
+  sc = function(nn, tcl, on, ocl)
+    return (ent(nn, tcl) * nn + ent(on, ocl) * on) / (log(2) * (nn + on))
+  end
+
+  -- Bin every x value of `tbl` once and keep the id past the end of the
+  -- row.  A bin id is a function of (row, column) alone -- it does not
+  -- depend on which rows a node happens to hold -- and `Forest` hands
+  -- all its trees the same tbl and the same row tables.  Without this,
+  -- one id is recomputed 34 to 71 times a build (measured, four sets).
+  -- With it, `tally`'s inner loop is an add and a read: no method
+  -- dispatch, no arithmetic, and no NUM/SYM branch.
+  --
+  -- Two things make writing into the row safe.  Nothing anywhere reads
+  -- `#row`, so the extra cells are invisible to the rest of the code;
+  -- and `clone` builds a fresh TAB, so `binAt` belongs to this table.
+  -- The ROWS, though, are shared with whatever table they came from:
+  -- two tables binning the same rows would write the same slots and the
+  -- last would win.  Hence one entry point, `TAB.cut`, and a guard --
+  -- and hence `tbl.rows`, not a node's subset, which is also what makes
+  -- it once a run rather than once a node.
+  -- The klass rides along, for the same reason and in the same place:
+  -- the search wants it as a small int, and a node that read the string
+  -- would hash it once per row per column.  Its slot is free -- the
+  -- klass is a y column, so no x column claims `off + klass.at`.
+  -- The codes are write-only: nothing maps them back.  `TREE.sum`
+  -- builds its `Sym` from the raw klass and `TREE.posts` reads that
+  -- `Sym`, so the only consumer is `tally`'s `(bin, klass)` index.
+  binRows = function(tbl)
+    if tbl.binned then
+      return
+    end
+    tbl.binned = true
+    local off = #tbl.cols
+    local _list_0 = tbl.x
+    for _index_0 = 1, #_list_0 do
+      local col = _list_0[_index_0]
+      col.binAt = off + col.at
+      local _list_1 = tbl.rows
+      for _index_1 = 1, #_list_1 do
+        local row = _list_1[_index_1]
+        row[col.binAt] = col:slot(row[col.at])
+      end
+    end
+    tbl.kodeAt, tbl.nk = off + tbl.klass.at, 0
+    local seen = { }
+    local _list_1 = tbl.rows
+    for _index_0 = 1, #_list_1 do
+      local row = _list_1[_index_0]
+      local v = row[tbl.klass.at]
+      if not seen[v] then
+        tbl.nk = tbl.nk + 1
+        seen[v] = tbl.nk
+      end
+      row[tbl.kodeAt] = seen[v]
+    end
     return nil
   end
-  local b = floor((x - self.mu) / self.r + 0.5)
-  return (b < -self.hi and -self.hi or (b > self.hi and self.hi or b)) + self.hi + 1
-end
 
--- A symbolic column's bins are its own values, indexed once, sorted
--- so a tie falls where it always did.
-SYM.index = function(self, vs)
-  if not self.vi then
-    do
-      local _accum_0 = { }
-      local _len_0 = 1
-      for v in pairs(self.has) do
-        _accum_0[_len_0] = v
-        _len_0 = _len_0 + 1
+  -- Count `rows` into (bin x klass); report the occupied span and how
+  -- many rows landed.  The span keeps a four-row leaf from sweeping
+  -- fifty-one bins.
+  local tally
+  tally = function(col, rows, kat, nk, nb, lo, up, nn, k, b, at)
+    for k = 1, nb * nk do
+      Hist[k] = 0
+    end
+    lo, up, nn = nb + 1, 0, 0
+    at = col.binAt
+    for _, row in order(rows) do
+      b = row[at]
+      if b then
+        local _update_0 = (b - 1) * nk + row[kat]
+        Hist[_update_0] = Hist[_update_0] + 1
+        lo, up, nn = min(lo, b), max(up, b), nn + 1
       end
-      vs = _accum_0
     end
-    sort(vs, function(a, b)
-      return tostring(a) < tostring(b)
-    end)
-    self.vs = vs
-    local _tbl_0 = { }
-    for n, v in ipairs(vs) do
-      _tbl_0[v] = n
-    end
-    self.vi = _tbl_0
+    return lo, up, nn
   end
-  return self.vi
-end
-SYM.slots = function(self)
-  return self:index() and #self.vs
-end
-SYM.edge = function(self, b)
-  return self.vs[b]
-end
-SYM.slot = function(self, x)
-  return x ~= "?" and self:index()[x] or nil
-end
 
--- ---- the histogram ------------------------------------------------
--- `SYM.div` is `(log n - cl/n)/log 2` with `cl = sum c*log c`, so a
--- count that moves changes exactly one term of cl.  Keeping cl
--- current costs two `log`s per changed klass per bin, where walking
--- the rows cost one per row.
-clog = function(c)
-  return c > 0 and c * log(c) or 0
-end
-
--- Entropy of `n` rows whose `sum c*log c` is `cl`, in nats: the
--- `/log 2` comes out once, in the score.
-ent = function(n, cl)
-  return max(0, log(n) - cl / n)
-end
-
--- `n` rows split `this`/`that` score as their sizes weigh their
--- entropies -- the same quantity `TAB.cut` used to get from two
--- `Sym`s, verified equal to `Sym.div` to 2.7e-15.
-sc = function(nn, tcl, on, ocl)
-  return (ent(nn, tcl) * nn + ent(on, ocl) * on) / (log(2) * (nn + on))
-end
-
--- Bin every x value of `tbl` once and keep the id past the end of the
--- row.  A bin id is a function of (row, column) alone -- it does not
--- depend on which rows a node happens to hold -- and `Forest` hands
--- all its trees the same tbl and the same row tables.  Without this,
--- one id is recomputed 34 to 71 times a build (measured, four sets).
--- With it, `tally`'s inner loop is an add and a read: no method
--- dispatch, no arithmetic, and no NUM/SYM branch.
---
--- Two things make writing into the row safe.  Nothing anywhere reads
--- `#row`, so the extra cells are invisible to the rest of the code;
--- and `clone` builds a fresh TAB, so `binAt` belongs to this table.
--- The ROWS, though, are shared with whatever table they came from:
--- two tables binning the same rows would write the same slots and the
--- last would win.  Hence one entry point, `TAB.cut`, and a guard --
--- and hence `tbl.rows`, not a node's subset, which is also what makes
--- it once a run rather than once a node.
--- The klass rides along, for the same reason and in the same place:
--- the search wants it as a small int, and a node that read the string
--- would hash it once per row per column.  Its slot is free -- the
--- klass is a y column, so no x column claims `off + klass.at`.
--- `kodes` is the way back, which `mid` and `posts` still need.
-binRows = function(tbl)
-  if tbl.binned then
-    return
-  end
-  tbl.binned = true
-  local off = #tbl.cols
-  local _list_0 = tbl.x
-  for _index_0 = 1, #_list_0 do
-    local col = _list_0[_index_0]
-    col.binAt = off + col.at
-    local _list_1 = tbl.rows
-    for _index_1 = 1, #_list_1 do
-      local row = _list_1[_index_1]
-      row[col.binAt] = col:slot(row[col.at])
-    end
-  end
-  tbl.kodeAt, tbl.kodes, tbl.nk = off + tbl.klass.at, { }, 0
-  local seen = { }
-  local _list_1 = tbl.rows
-  for _index_0 = 1, #_list_1 do
-    local row = _list_1[_index_0]
-    local v = row[tbl.klass.at]
-    if not seen[v] then
-      tbl.nk = tbl.nk + 1
-      seen[v] = tbl.nk
-      tbl.kodes[tbl.nk] = v
-    end
-    row[tbl.kodeAt] = seen[v]
-  end
-  return nil
-end
-
--- Count `rows` into (bin x klass); report the occupied span and how
--- many rows landed.  The span keeps a four-row leaf from sweeping
--- fifty-one bins.
-tally = function(col, rows, kat, nk, nb, lo, up, nn, k, b, at)
-  for k = 1, nb * nk do
-    Hist[k] = 0
-  end
-  lo, up, nn = nb + 1, 0, 0
-  at = col.binAt
-  for _, row in order(rows) do
-    b = row[at]
-    if b then
-      local _update_0 = (b - 1) * nk + row[kat]
-      Hist[_update_0] = Hist[_update_0] + 1
-      lo, up, nn = min(lo, b), max(up, b), nn + 1
-    end
-  end
-  return lo, up, nn
-end
-
--- NUMERIC: walk left to right, moving each bin's counts from `that`
--- side to `this` one, offering the cut that leaves behind.  `cl` is carried
--- rather than rebuilt; old term off then new term on, in that order,
--- because float addition is not associative and `(cl-a)+z` differs
--- from `cl+(z-a)` by enough to flip a near-tie.
-NUM.sweep = function(self, nk, lo, up, nn, out, on, tcl, ocl, b, i, c, a, z)
-  on, nn, tcl, ocl = nn, 0, 0, 0
-  for i = 1, nk do
-    ThisC[i], ThatC[i] = 0, 0
-    for b = lo, up do
-      ThatC[i] = ThatC[i] + Hist[(b - 1) * nk + i]
-    end
-    ocl = ocl + clog(ThatC[i])
-  end
-  for b = lo, up - 1 do
+  -- NUMERIC: walk left to right, moving each bin's counts from `that`
+  -- side to `this` one, offering the cut that leaves behind.  `cl` is carried
+  -- rather than rebuilt; old term off then new term on, in that order,
+  -- because float addition is not associative and `(cl-a)+z` differs
+  -- from `cl+(z-a)` by enough to flip a near-tie.
+  NUM.sweep = function(self, nk, lo, up, nn, out, on, tcl, ocl, b, i, c, a, z)
+    on, nn, tcl, ocl = nn, 0, 0, 0
     for i = 1, nk do
-      c = Hist[(b - 1) * nk + i]
-      if c == 0 then
-        goto _continue_1
+      ThisC[i], ThatC[i] = 0, 0
+      for b = lo, up do
+        ThatC[i] = ThatC[i] + Hist[(b - 1) * nk + i]
       end
-      a, z = clog(ThisC[i]), clog(ThisC[i] + c)
-      ThisC[i], tcl = ThisC[i] + c, tcl - a + z
-      a, z = clog(ThatC[i]), clog(ThatC[i] - c)
-      ThatC[i], ocl = ThatC[i] - c, ocl - a + z
-      nn, on = nn + c, on - c
-      ::_continue_1::
+      ocl = ocl + clog(ThatC[i])
     end
-    if nn < the.leaf or on < the.leaf then
-      goto _continue_0
+    for b = lo, up - 1 do
+      for i = 1, nk do
+        c = Hist[(b - 1) * nk + i]
+        if c == 0 then
+          goto _continue_1
+        end
+        a, z = clog(ThisC[i]), clog(ThisC[i] + c)
+        ThisC[i], tcl = ThisC[i] + c, tcl - a + z
+        a, z = clog(ThatC[i]), clog(ThatC[i] - c)
+        ThatC[i], ocl = ThatC[i] - c, ocl - a + z
+        nn, on = nn + c, on - c
+        ::_continue_1::
+      end
+      if nn < the.leaf or on < the.leaf then
+        goto _continue_0
+      end
+      out(sc(nn, tcl, on, ocl), self:edge(b))
+      ::_continue_0::
     end
-    out(sc(nn, tcl, on, ocl), self:edge(b))
-    ::_continue_0::
+    return nil
   end
-  return nil
-end
 
--- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `this` is one bin on
--- its own and `that` is everything else -- no carrying, and the bins
--- need no order between them.
-SYM.sweep = function(self, nk, lo, up, nn, out, b, i, c, d, tn, on, tcl, ocl)
-  for i = 1, nk do
-    ThatC[i] = 0
-    for b = lo, up do
-      ThatC[i] = ThatC[i] + Hist[(b - 1) * nk + i]
-    end
-  end
-  for b = lo, up do
-    tn, on, tcl, ocl = 0, 0, 0, 0
+  -- SYMBOLIC: a cut is `x == v`, not `x <= v`, so `this` is one bin on
+  -- its own and `that` is everything else -- no carrying, and the bins
+  -- need no order between them.
+  SYM.sweep = function(self, nk, lo, up, nn, out, b, i, c, d, tn, on, tcl, ocl)
     for i = 1, nk do
-      c = Hist[(b - 1) * nk + i]
-      d = ThatC[i] - c
-      tn, tcl = tn + c, tcl + clog(c)
-      on, ocl = on + d, ocl + clog(d)
+      ThatC[i] = 0
+      for b = lo, up do
+        ThatC[i] = ThatC[i] + Hist[(b - 1) * nk + i]
+      end
     end
-    if tn < the.leaf or on < the.leaf then
-      goto _continue_0
+    for b = lo, up do
+      tn, on, tcl, ocl = 0, 0, 0, 0
+      for i = 1, nk do
+        c = Hist[(b - 1) * nk + i]
+        d = ThatC[i] - c
+        tn, tcl = tn + c, tcl + clog(c)
+        on, ocl = on + d, ocl + clog(d)
+      end
+      if tn < the.leaf or on < the.leaf then
+        goto _continue_0
+      end
+      out(sc(tn, tcl, on, ocl), self:edge(b))
+      ::_continue_0::
     end
-    out(sc(tn, tcl, on, ocl), self:edge(b))
-    ::_continue_0::
+    return nil
   end
-  return nil
-end
 
--- One column, counted and swept.  The only thing the two kinds still
--- disagree about is what a cut MEANS, so that is the one thing the
--- column is asked: `slots`, `slot`, `edge` and `sweep` all dispatch on
--- it, and nothing here tests which kind it is.
---
--- The counting stays a plain function.  `NUM` and `SYM` are two
--- metatables with no parent -- `Col` picks between them, it is not a
--- base class -- so a shared prologue has nowhere polymorphic to live,
--- and giving it the name `hist` on both would mean copying it twice.
-hist = function(col, rows, kat, nk, out, nb, lo, up, nn)
-  nb = col:slots()
-  if not (nb and nb > 1) then
-    return
+  -- One column, counted and swept.  The only thing the two kinds still
+  -- disagree about is what a cut MEANS, so that is the one thing the
+  -- column is asked: `slots`, `slot`, `edge` and `sweep` all dispatch on
+  -- it, and nothing here tests which kind it is.
+  --
+  -- The counting stays a plain function.  `NUM` and `SYM` are two
+  -- metatables with no parent -- `Col` picks between them, it is not a
+  -- base class -- so a shared prologue has nowhere polymorphic to live,
+  -- and giving it the name `hist` on both would mean copying it twice.
+  hist = function(col, rows, kat, nk, out, nb, lo, up, nn)
+    nb = col:slots()
+    if not (nb and nb > 1) then
+      return
+    end
+    lo, up, nn = tally(col, rows, kat, nk, nb)
+    if nn < 2 * the.leaf or lo >= up then
+      return
+    end
+    return col:sweep(nk, lo, up, nn, out)
   end
-  lo, up, nn = tally(col, rows, kat, nk, nb)
-  if nn < 2 * the.leaf or lo >= up then
-    return
-  end
-  return col:sweep(nk, lo, up, nn, out)
 end
 
 -- The cut of `rows` that leaves the least klass entropy, found by
