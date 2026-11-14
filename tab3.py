@@ -17,6 +17,27 @@ the = o(version="0.6.0", bins=7, budget=50, check=5, fmt="%.2f",
         train="~/gits/moot/optimize/misc/auto93.csv")
 
 # ---- values ----------------------------------------------------------
+def zap(x):
+  """Forget every `cached_property` of `x`, so the next read redoes it.
+
+  `cached_property` writes into the instance `__dict__` and the dict
+  then shadows the descriptor, so deleting the key is the whole of
+  invalidation.  Found by asking the CLASS what is cached rather than
+  naming the keys here: add a new one and this keeps working.  `pop`,
+  not `del`, because a value never read has no key to delete.
+
+  Needed because `Num.half` reads `the.cuts` ONCE.  Sweep that flag
+  over one table -- `for cuts in (11, 21, 51)` -- and without this
+  every column keeps the bins it chose on the first pass.
+
+  NOT called from `add`.  `r` is fixed on purpose: every tree and node
+  of a forest has to agree what bin 7 means, so a column that keeps
+  growing keeps the width it first chose.  Zapping per row also costs
+  (measured) 59% of a bare `add`, and scanning per row costs 470%.
+  """
+  for k in type(x)._cached: x.__dict__.pop(k, None)
+  return x
+
 def value(s): # int float or string
   s = s.strip()
   try: return int(s)
@@ -31,20 +52,66 @@ def csv(file):  # rows of `file`; skip blank and commented liens
     return [values(s) for line in f
             if (s := line.strip()) and not s.startswith("#")]
 
+def move(src, dst, inc):
+  "Every count of `src`, into `dst` (inc=1) or out of it (inc=-1)."
+  for v, c in src.has.items(): dst.add(v, inc * c)
+
+def hist(col, rows, kat):
+  """bin -> Sym of the klasses that landed in it, and the margin.
+
+  The margin is summed from the BINS, not from a second pass over the
+  rows: O(bins x klasses) against O(rows), and the two are the same
+  number because a row reaches a bin exactly when it reaches the
+  margin.  Note it is NOT the node's klasses -- a row whose value in
+  THIS column is "?" gets no bin and so counts in neither.  Hoisting
+  it to the node (tried, measured 24-41% faster) silently builds
+  different trees on all 13 moot/classify sets that have a "?".
+  """
+  h = {}
+  for row in rows:
+    b = col.slot(row[col.at])
+    if b is None: continue
+    if b not in h: h[b] = Sym()
+    if (k := row[kat]) != "?": h[b].add(k)   # an unlabelled row is
+                                            # binned, never counted
+  all = Sym()
+  for s in h.values(): move(s, all, 1)
+  return h, all
+
 # ---- columns ---------------------------------------------------------
 def Col(txt, at): return (Num if txt[:1].isupper() else Sym)(txt, at)
 
 class Sym:  # a count per value; `div` is their entropy.
+  ops = ("==", "!=")            # how a cut of it reads
+
+  def cut(i, rows, kat):
+    """`x == v`, so `this` is ONE bin and `that` is the rest.
+
+    `that` is rebuilt per bin rather than rewound.  Rewinding is one
+    allocation cheaper and was measured exact, but it hands the caller
+    a Sym that is only correct until the next line runs -- and nothing
+    in the signature would say so.  Bins need no order here; which one
+    is seen first only decides a tie.
+    """
+    h, all = hist(i, rows, kat)
+    for b in h:
+      rest = Sym()
+      move(all, rest, 1)
+      move(h[b], rest, -1)
+      yield h[b], rest, b
   def __init__(i, txt="S", at=0):
     i.txt, i.at, i.n, i.has, i.kinds = txt, at, 0, {}, None
 
   def add(i, v, inc=1):
-    "`inc=-1` takes one back out, so a sweep can shift rows across a cut."
-    if v != "?":
-      i.n += inc
-      c = i.has.get(v, 0) + inc
-      if c > 0: i.has[v] = c
-      else: i.has.pop(v, None)         # a count of 0 is not a value
+    """`inc=-1` takes one back out, so a sweep can shift rows across a cut.
+
+    `v` is never "?" -- every CALLER filters, so this hot loop does
+    not pay a string compare per cell.  See `Tab.add`.
+    """
+    i.n += inc
+    c = i.has.get(v, 0) + inc
+    if c > 0: i.has[v] = c
+    else: i.has.pop(v, None)           # a count of 0 is not a value
     return v
 
   def mid(i): return max(i.has, key=i.has.get, default=None)
@@ -52,7 +119,6 @@ class Sym:  # a count per value; `div` is their entropy.
     f = lambda n: n/i.n * log2(n/i.n)
     return 0 if i.n < 1 else -sum(f(c) for c in i.has.values())
 
-  ops = ("==", "!=")            # how a cut of it reads
   def norm(i, v)     : return v
   def holds(i, x, v) : return x == "?" or x == v
   def bin(i, v)      : return v
@@ -62,21 +128,35 @@ class Sym:  # a count per value; `div` is their entropy.
 
 class Num:
   ops = ("<=", ">")             # how a cut of it reads
+
+  def cut(i, rows, kat):
+    "`x <= v`, so `this` GROWS left to right: the histogram's cdf."
+    h, that = hist(i, rows, kat)
+    this = Sym()
+    for b in sorted(h):           # ascending, or it is not a cdf
+      move(h[b], this, 1)
+      move(h[b], that, -1)
+      yield this, that, b
   def __init__(i, txt="N", at=0):
     i.txt, i.at, i.n, i.mu, i.m2 = txt, at, 0, 0.0, 0.0
     i.w = 0 if txt.endswith("-") else 1
+    i.sd = None
 
   def add(i, v, inc=1):
-    if v != "?":
-      i.n += inc
-      if i.n <= 0: i.n, i.mu, i.m2 = 0, 0.0, 0.0
-      else:
-        d = v - i.mu
-        i.mu += inc * d / i.n
-        i.m2 += inc * d * (v - i.mu)
+    "`v` is never \"?\": the callers filter.  See `Sym.add`."
+    i.n += inc
+    i.sd = None
+    if i.n <= 0: i.n, i.mu, i.m2 = 0, 0.0, 0.0
+    else:
+      d = v - i.mu
+      i.mu += inc * d / i.n
+      i.m2 += inc * d * (v - i.mu)
     return v
 
-  def div(i): return 0 if i.n < 2 else sqrt(max(i.m2, 0) / (i.n - 1))
+  def div(i): 
+    if not i.sd: i.sd = 0 if i.n < 2 else sqrt(max(i.m2, 0) / (i.n - 1))
+    return i.sd
+
   def mid(i): return i.mu
   def holds(i, x, v): return x == "?" or x <= v   
   def norm(i, v):
@@ -85,8 +165,7 @@ class Num:
     z = 3 if z > 3 else (-3 if z < -3 else z)
     return 1 / (1 + exp(-1.7 * z))
 
-  def bin(i, v):
-    return  v if v == "?" else min(the.bins, 1+floor(the.bins*i.norm(v)))
+  def bin(i, v): return min(the.bins, 1 + floor(the.bins * i.norm(v)))
 
   @cached_property
   def half(i): return floor(the.cuts / 2)   
@@ -111,11 +190,15 @@ class Tab:
   def add(i, row):
     if not i.cols: return i.head(row)
     i.rows.append(row)
-    for col in i.cols: col.add(row[col.at])
+    # Here, and at the three sites below, is where "?" is stopped.
+    # Nowhere else may call `add`/`bin` with a raw cell.
+    for col in i.cols:
+      if (v := row[col.at]) != "?": col.add(v)
     return row
 
   def forget(i, row):
-    for col in i.cols: col.add(row[col.at], -1)
+    for col in i.cols:
+      if (v := row[col.at]) != "?": col.add(v, -1)
     return row
 
   def head(i, names):
@@ -140,7 +223,8 @@ class Tab:
     out = [head]
     for row in rows:
       out.append(row if not how else
-                 [getattr(c, how)(row[c.at]) for c in i.cols])
+                 [v if (v := row[c.at]) == "?" else getattr(c, how)(v)
+                  for c in i.cols])
     return Tab(out)
 
   def mid(i, cols=None):
@@ -195,8 +279,7 @@ class Tab:
     """
     bs = bc = bv = None
     for col in pick(i.x, cols):
-      h, all = hist(col, rows, i.klass.at)
-      for this, that, b in sweep(col, h, all):
+      for this, that, b in col.cut(rows, i.klass.at):
         if this.n < the.leaf or that.n < the.leaf: continue
         s = (this.div() * this.n + that.div() * that.n) / (this.n + that.n)
         if bs is None or s < bs:     # strict `<` keeps the FIRST of a tie
@@ -210,44 +293,6 @@ class Tab:
 # scratch buffers, no bin ids cached on the rows, no klass codes, no
 # carried `cl`.  Every cache this file could have is absent on purpose,
 # so the profiler is pointed at the algorithm and not at the tricks.
-
-def move(src, dst, inc):
-  "Every count of `src`, into `dst` (inc=1) or out of it (inc=-1)."
-  for v, c in src.has.items(): dst.add(v, inc * c)
-
-def hist(col, rows, kat):
-  "bin -> Sym of the klasses that landed in it, and the margin."
-  h, all = {}, Sym()
-  for row in rows:
-    b = col.slot(row[col.at])
-    if b is None: continue
-    if b not in h: h[b] = Sym()
-    h[b].add(row[kat])
-    all.add(row[kat])
-  return h, all
-
-def sweep(col, h, that):
-  """Offer (this, that, bin) for each cut of `col`.
-
-  NUMERIC accumulates -- `this` is the histogram's running cdf, so each
-  bin moves from `that` to `this` and stays.  SYMBOLIC does not: a cut
-  is `x == v`, so `this` is one bin alone and `that` is the margin with
-  that bin taken out.  `that` is REBUILT there rather than rewound,
-  because handing a callback a Sym that is only correct until the next
-  line runs is a hazard nothing in the signature admits to.
-  """
-  if isinstance(col, Sym):
-    for b in h:                   # any order: `x == v` needs none, and
-      rest = Sym()                # the order only decides a tie
-      move(that, rest, 1)
-      move(h[b], rest, -1)
-      yield h[b], rest, b
-  else:
-    this = Sym()
-    for b in sorted(h):           # ASCENDING: `this` is the cdf
-      move(h[b], this, 1)
-      move(h[b], that, -1)
-      yield this, that, b
 
 # ---- bayes -----------------------------------------------------------
 class Nb:
@@ -314,7 +359,8 @@ class Tree:
     "What this node answers with: its klasses, and their majority."
     i.all = Sym()
     at = i.tbl.klass.at
-    for row in i.rows: i.all.add(row[at])
+    for row in i.rows:
+      if (k := row[at]) != "?": i.all.add(k)
     i.mid = i.all.mid()
     return i
 
@@ -517,6 +563,11 @@ def say(d, indent=0):
       out.append(pad + str(k))
       out.append(say(d[k], indent + 1))
   return "\n".join(out)
+
+# The names `zap` clears, found ONCE per class rather than per call.
+for _cls in (o, Sym, Num, Tab, Tree, Forest):
+  _cls._cached = tuple(k for k, v in vars(_cls).items()
+                       if isinstance(v, cached_property))
 
 # ---- tests -----------------------------------------------------------
 # Demos double as tests, and every golden number below is tab.yue's own.
