@@ -35,12 +35,14 @@ the = o(**{k:value(v) for k,v in re.findall(r"\n\s+(\w+)=(\S+)",__doc__)})
 def some(rows, n=None):
   return random.choices(rows, k=n or len(rows))
 
-def fair(rows, at):
-  "Yield bootstraps of ROWS, at most the.cap rows of any one klass."
+def fair(rows, y=None):
+  """Yield bootstraps of ROWS.  Given Y, a row's klass, each holds at
+  most the.cap rows of any one klass; else it is a plain bootstrap."""
   by = {}
-  for r in rows: by.setdefault(r.raw[at], []).append(r)
+  if y and the.cap:
+    for r in rows: by.setdefault(y(r), []).append(r)
   while True:
-    yield (some(rows) if not the.cap else
+    yield (some(rows) if not by else
            [r for g in by.values() for r in some(g, min(the.cap, len(g)))])
 
 def pick(lst, n=0):
@@ -201,12 +203,19 @@ class Tree:
     return d
 
 class Forest:
-  def __init__(i, tab, rows=None, rounds=None):
+  """Y says what to guess.  None: the `!` klass column, by vote.  A
+  column, e.g. tab.y[0]: that column, as its own type has it.  A
+  function of a row, e.g. tab.ydist: the number it returns."""
+  def __init__(i, tab, rows=None, rounds=None, y=None):
     rows = tab.rows if rows is None else rows
-    at, i.tab, i.all = tab.klass.at, tab, []
+    if y is None: y, i.Y = tab.klass, Sym
+    else: i.Y = Num if callable(y) else type(y)
+    i.y = y if callable(y) else (lambda r, at=y.at: r.raw[at])
+    i.tab, i.all = tab, []
     c = max(1, floor(sqrt(len(tab.x))))
-    for _, rs in zip(range(rounds or the.rounds), fair(rows, at)):
-      i.all.append(Tree(tab, rs, [r.raw[at] for r in rs], Sym, c))
+    draws = fair(rows, i.y if i.Y is Sym else None)
+    for _, rs in zip(range(rounds or the.rounds), draws):
+      i.all.append(Tree(tab, rs, [i.y(r) for r in rs], i.Y, c))
   def votes(i, row):
     t, ks = {}, []
     for m in i.all:
@@ -220,6 +229,8 @@ class Forest:
     z = max(sum(t[k] for k in ks), 1)
     return {k: t[k] / z for k in ks}
   def guess(i, row):
+    if i.Y is Num:
+      return sum(m.leaf(row).mid for m in i.all) / len(i.all)
     t, ks = i.votes(row)
     bk, b = None, -1
     for k in ks:
@@ -324,6 +335,26 @@ def test_tree():
   node = Tree(t, t.rows, [t.ydist(r) for r in t.rows])
   print(logfmt(**node.dict()))
   assert node.kids and len(node.rows) == 398
+
+def regress(y):
+  "Held-out mae of a forest guessing Y(tab), and of guessing the mean."
+  t = Tab(the.train)
+  rows = t.rows[:]; random.shuffle(rows)
+  n = int(.8 * len(rows))
+  train, test = t.clone(rows[:n]), rows[n:]
+  f = Forest(train, y=y(train))
+  want = [f.y(r) for r in test]
+  mu = sum(f.y(r) for r in train.rows) / len(train.rows)
+  err = lambda got: sum(abs(a - b) for a, b in zip(want, got)) / len(want)
+  return err([f.guess(r) for r in test]), err([mu] * len(test))
+
+def test_forcol():
+  mae, mean = regress(lambda t: t.y[0])
+  print(logfmt(y="y[0]", mae=mae, mean=mean)); assert mae < mean / 2
+
+def test_fordist():
+  mae, mean = regress(lambda t: t.ydist)
+  print(logfmt(y="ydist", mae=mae, mean=mean)); assert mae < mean / 2
 
 def test_forest():
   t0 = time.perf_counter()
