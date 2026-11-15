@@ -6,6 +6,7 @@ Columns: Uppercase=Num, else Sym; names ending X skip, -+! are goals,
 
 Options:
   bins=7     numeric columns get this many bins
+  cap=256    most rows of one klass a tree may train on (0: no cap)
   cls=~/gits/moot/classify/soybean.csv  labelled data, for a forest
   depth=12   how deep a tree may grow
   fmt=%.2f   how floats print
@@ -33,6 +34,14 @@ the = o(**{k:value(v) for k,v in re.findall(r"\n\s+(\w+)=(\S+)",__doc__)})
 
 def some(rows, n=None):
   return random.choices(rows, k=n or len(rows))
+
+def fair(rows, at):
+  "Yield bootstraps of ROWS, at most the.cap rows of any one klass."
+  by = {}
+  for r in rows: by.setdefault(r.raw[at], []).append(r)
+  while True:
+    yield (some(rows) if not the.cap else
+           [r for g in by.values() for r in some(g, min(the.cap, len(g)))])
 
 def pick(lst, n=0):
   return lst if not n or n >= len(lst) else random.sample(lst, n)
@@ -196,8 +205,7 @@ class Forest:
     rows = tab.rows if rows is None else rows
     at, i.tab, i.all = tab.klass.at, tab, []
     c = max(1, floor(sqrt(len(tab.x))))
-    for _ in range(rounds or the.rounds):
-      rs = some(rows)
+    for _, rs in zip(range(rounds or the.rounds), fair(rows, at)):
       i.all.append(Tree(tab, rs, [r.raw[at] for r in rs], Sym, c))
   def votes(i, row):
     t, ks = {}, []
@@ -303,6 +311,13 @@ def test_some():
   print(logfmt(some=ok(len(some(xs)), 10), pick=ok(len(pick(xs, 3)), 3),
                all=ok(len(pick(xs)), 10)))
   assert pick(xs) is xs
+
+def test_cap():
+  old, the.cap = the.cap, 5
+  f = Forest(Tab(the.cls)); the.cap = old
+  k = len(f.tab.klass.has)
+  print(logfmt(klasses=k, most=max(len(t.rows) for t in f.all)))
+  assert all(len(t.rows) <= 5 * k for t in f.all)
 
 def test_tree():
   t = Tab(the.train)
