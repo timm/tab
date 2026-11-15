@@ -9,6 +9,7 @@ Options:
   cap=256    most rows of one klass a tree may train on (0: no cap)
   cls=~/gits/moot/classify/soybean.csv  labelled data, for a forest
   depth=12   how deep a tree may grow
+  few=200    most rows a tree may train on, guessing a number (0: all)
   fmt=%.2f   how floats print
   leaf=2     rows each side of a cut needs
   p=2        minkowski coefficient
@@ -36,13 +37,12 @@ def some(rows, n=None):
   return random.choices(rows, k=n or len(rows))
 
 def fair(rows, y=None):
-  """Yield bootstraps of ROWS.  Given Y, a row's klass, each holds at
-  most the.cap rows of any one klass; else it is a plain bootstrap."""
   by = {}
   if y and the.cap:
     for r in rows: by.setdefault(y(r), []).append(r)
+  n = len(rows) if y or not the.few else min(the.few, len(rows))
   while True:
-    yield (some(rows) if not by else
+    yield (some(rows, n) if not by else
            [r for g in by.values() for r in some(g, min(the.cap, len(g)))])
 
 def pick(lst, n=0):
@@ -54,9 +54,11 @@ def csv(file):
       s = line.strip()
       if s and s[0] != "#": yield [value(x) for x in s.split(",")]
 
+# ------------------------------------------------------------------------
 class Row:
   def __init__(i, raw): i.raw, i.cooked = raw, []
 
+# ------------------------------------------------------------------------
 class Sym:
   ops = ("==", "!=")
   def __init__(i, txt="S", at=0):
@@ -91,6 +93,7 @@ class Sym:
         if x != v: there.merge(s)
       yield h[v], there, v
 
+# ------------------------------------------------------------------------
 class Num:
   ops = ("<=", ">")
   def __init__(i, txt="N", at=0):
@@ -135,6 +138,7 @@ class Num:
         (here if k <= j else there).merge(h[b][0])
       yield here, there, h[bs[j]][1]
 
+# ------------------------------------------------------------------------
 class Tab:
   def __init__(i, src):
     i.rows, i.cols = [], None
@@ -176,6 +180,7 @@ class Tab:
             for c in i.y) / len(i.y)
     return d ** (1 / the.p)
 
+# ------------------------------------------------------------------------
 class Tree:
   def __init__(i, tab, rows, ys, Y=None, cols=0, txt="", lvl=1):
     Y = Y or (Sym if isa(ys[0], str) else Num)
@@ -203,9 +208,6 @@ class Tree:
     return d
 
 class Forest:
-  """Y says what to guess.  None: the `!` klass column, by vote.  A
-  column, e.g. tab.y[0]: that column, as its own type has it.  A
-  function of a row, e.g. tab.ydist: the number it returns."""
   def __init__(i, tab, rows=None, rounds=None, y=None):
     rows = tab.rows if rows is None else rows
     if y is None: y, i.Y = tab.klass, Sym
@@ -237,6 +239,7 @@ class Forest:
       if t[k] > b: b, bk = t[k], k
     return bk
 
+# ------------------------------------------------------------------------
 def auc(t):
   ps = sorted(s for s, want in t if want)
   ns = sorted(s for s, want in t if not want)
@@ -284,6 +287,7 @@ def logfmt(_indent=0, **d):
       lines += [pad + k, logfmt(_indent + 1, **v)]
   return "\n".join(lines)
 
+# ------------------------------------------------------------------------
 def test_all():
   for k in sorted(globals()):
     if k.startswith("test_") and k != "test_all": run(k)
@@ -356,6 +360,14 @@ def test_fordist():
   mae, mean = regress(lambda t: t.ydist)
   print(logfmt(y="ydist", mae=mae, mean=mean)); assert mae < mean / 2
 
+def test_few():
+  t = Tab(the.train)
+  f = Forest(t, y=t.ydist)
+  old, the.few = the.few, 0
+  g = Forest(t, y=t.ydist); the.few = old
+  n, m = len(f.all[0].rows), len(g.all[0].rows)
+  print(logfmt(few=n, all=m)); assert n == (old or 398) and m == 398
+
 def test_forest():
   t0 = time.perf_counter()
   data = Tab(the.cls)
@@ -374,6 +386,7 @@ def test_forest():
                secs=time.perf_counter() - t0))
   assert 0 <= a <= 1 and nk > 1
 
+# ------------------------------------------------------------------------
 def run(k):
   random.seed(the.seed)
   print(":" + k[5:]); globals()[k]()
